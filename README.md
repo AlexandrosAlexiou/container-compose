@@ -20,6 +20,34 @@ make build
 sudo make install
 ```
 
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `up` | Create and start containers (`-d`, `--build`, `--scale`) |
+| `down` | Stop and remove containers, networks (`-v`) |
+| `ps` | List running services |
+| `logs` | View output from containers (`-f`, `--tail`) |
+| `build` | Build or rebuild services |
+| `exec` | Execute a command in a running service container |
+| `run` | Run a one-off command on a service (`--rm`, `-e`, `-u`, `-w`) |
+| `start` | Start existing stopped containers |
+| `stop` | Stop running containers without removing |
+| `restart` | Restart service containers |
+| `create` | Create containers without starting them |
+| `rm` | Remove stopped service containers (`-f`) |
+| `kill` | Send a signal to service containers (`-s`) |
+| `pull` | Pull service images |
+| `push` | Push service images |
+| `cp` | Copy files to/from service containers |
+| `top` | Display running processes |
+| `port` | Print the public port for a port binding |
+| `images` | List images used by services |
+| `stats` | Display container resource usage |
+| `config` | Validate and render compose file |
+| `version` | Show version information |
+| `wait` | Block until a service container stops |
+
 ## Usage
 
 ```bash
@@ -55,6 +83,32 @@ container-compose build api
 # Execute a command in a running container
 container-compose exec db psql -U postgres
 
+# Run a one-off command
+container-compose run web python manage.py migrate
+
+# Lifecycle management
+container-compose stop web
+container-compose start web
+container-compose restart web
+container-compose kill -s SIGTERM web
+
+# Image operations
+container-compose pull
+container-compose push
+container-compose images
+
+# Copy files
+container-compose cp web:/app/logs ./logs
+container-compose cp ./config.yml web:/app/config.yml
+
+# Inspect
+container-compose top
+container-compose stats
+container-compose port web 80
+
+# Validate compose file
+container-compose config
+
 # Use a specific compose file
 container-compose -f my-compose.yml up -d
 
@@ -64,10 +118,12 @@ container-compose -p myapp up -d
 
 ## Supported Compose Features
 
+### Service Configuration
+
 | Feature | Status |
 |---------|--------|
 | `image` | ✅ |
-| `build` | ✅ |
+| `build` (context, dockerfile, args, target, cache_from, no_cache) | ✅ |
 | `ports` | ✅ |
 | `volumes` (bind + named) | ✅ |
 | `environment` | ✅ |
@@ -77,27 +133,45 @@ container-compose -p myapp up -d
 | `entrypoint` | ✅ |
 | `working_dir` | ✅ |
 | `user` | ✅ |
+| `container_name` | ✅ |
 | `depends_on` (ordering) | ✅ |
 | `depends_on` (service_healthy) | ✅ |
 | `cpus` / `mem_limit` | ✅ |
+| `deploy.replicas` | ✅ |
+| `deploy.resources` (limits) | ✅ |
 | `dns` / `dns_search` | ✅ |
+| `extra_hosts` | ✅ |
+| `hostname` / `domainname` | ✅ |
 | `init` | ✅ |
 | `read_only` | ✅ |
 | `tmpfs` | ✅ |
-| `labels` | ✅ |
+| `tty` / `stdin_open` | ✅ |
+| `stop_signal` / `stop_grace_period` | ✅ |
+| `labels` / `annotations` | ✅ |
 | `platform` | ✅ |
-| `hostname` | ✅ |
+| `pull_policy` | ✅ |
+| `logging` (driver + options) | ✅ |
+| `mac_address` | ✅ |
+| `shm_size` | ✅ |
+| `secrets` (file-based) | ✅ |
+| `configs` (file-based) | ✅ |
 | `profiles` | ✅ |
 | `extends` / `includes` | ✅ (via compose-go) |
 | `restart` policies | ✅ |
-| `deploy.replicas` | ✅ |
 | DNS service discovery | ✅ (via hostname + shared network) |
 | Port conflict detection | ✅ |
-| `secrets` / `configs` | 🚧 Planned |
-| Multiple networks per service | ⚠️ First network only |
-| `privileged` / `cap_add` | ❌ N/A (VM isolation) |
-| `devices` | ❌ N/A |
-| `network_mode: host` | ❌ N/A (separate VMs) |
+
+### Not Applicable (VM Isolation)
+
+These features don't apply because Apple Container runs each container in a separate lightweight VM:
+
+| Feature | Reason |
+|---------|--------|
+| `privileged` / `cap_add` / `cap_drop` | VM provides full isolation |
+| `devices` | Hardware passthrough not supported |
+| `network_mode: host` | Each VM has its own network stack |
+| `pid` / `ipc` namespace sharing | VMs have separate namespaces |
+| `security_opt` / `sysctls` | VM-level security |
 
 ## Example
 
@@ -114,13 +188,17 @@ services:
       - api
 
   api:
-    image: node:20-alpine
+    build:
+      context: ./api
+      args:
+        NODE_ENV: production
+      target: runtime
     working_dir: /app
     command: ["node", "server.js"]
-    volumes:
-      - ./api:/app
     environment:
       DATABASE_URL: postgres://db:5432/myapp
+    secrets:
+      - db_password
     depends_on:
       - db
 
@@ -128,9 +206,18 @@ services:
     image: postgres:16
     environment:
       POSTGRES_DB: myapp
-      POSTGRES_PASSWORD: secret
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
     volumes:
       - db-data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 512M
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
 
 volumes:
   db-data:
@@ -140,6 +227,7 @@ volumes:
 container-compose up -d
 container-compose ps
 container-compose logs -f api
+container-compose exec db psql -U postgres
 container-compose down -v
 ```
 
