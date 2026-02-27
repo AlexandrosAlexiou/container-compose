@@ -115,6 +115,30 @@ func TestExtraNetworks(t *testing.T) {
 	}
 }
 
+func TestDNSDiscovery(t *testing.T) {
+	service := types.ServiceConfig{
+		Image: "postgres",
+	}
+
+	args := ContainerRunArgs("myapp", service, "db", 1)
+	argsStr := strings.Join(args, " ")
+
+	// Should set hostname to service name for DNS discovery
+	if !strings.Contains(argsStr, "--hostname db") {
+		t.Errorf("expected --hostname db for DNS discovery, got: %s", argsStr)
+	}
+
+	// Should set DNS domain to project name
+	if !strings.Contains(argsStr, "--dns-domain myapp") {
+		t.Errorf("expected --dns-domain myapp, got: %s", argsStr)
+	}
+
+	// Should be on default network
+	if !strings.Contains(argsStr, "--network myapp_default") {
+		t.Errorf("expected --network myapp_default, got: %s", argsStr)
+	}
+}
+
 func TestContainerName(t *testing.T) {
 	name := ContainerName("myapp", "web", 1)
 	if name != "myapp-web-1" {

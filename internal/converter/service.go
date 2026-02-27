@@ -97,6 +97,16 @@ func ContainerRunArgs(projectName string, service types.ServiceConfig, serviceNa
 		args = append(args, "--dns", dns)
 	}
 
+	// DNS search domain: add project name so services can resolve by short name
+	if len(service.DNSSearch) > 0 {
+		for _, search := range service.DNSSearch {
+			args = append(args, "--dns-search", search)
+		}
+	}
+
+	// DNS domain: set to project name for service discovery
+	args = append(args, "--dns-domain", projectName)
+
 	// Init
 	if service.Init != nil && *service.Init {
 		args = append(args, "--init")
