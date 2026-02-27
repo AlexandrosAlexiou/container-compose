@@ -53,6 +53,9 @@ func init() {
 	// Config / Version
 	rootCmd.AddCommand(newConfigCmd())
 	rootCmd.AddCommand(newVersionCmd())
+
+	// Interactive
+	rootCmd.AddCommand(newAttachCmd())
 }
 
 func Execute() error {

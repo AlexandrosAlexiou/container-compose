@@ -254,6 +254,47 @@ func ContainerRunArgsWithProject(projectName string, service types.ServiceConfig
 		args = append(args, "--pull", service.PullPolicy)
 	}
 
+	// Healthcheck: pass definition as container flags if available
+	if service.HealthCheck != nil && !service.HealthCheck.Disable {
+		if len(service.HealthCheck.Test) > 0 {
+			// Test can be ["CMD", "arg1", ...] or ["CMD-SHELL", "cmd"]
+			// Pass the full test as a healthcheck-cmd
+			test := service.HealthCheck.Test
+			if len(test) > 1 && (test[0] == "CMD" || test[0] == "CMD-SHELL") {
+				args = append(args, "--health-cmd", strings.Join(test[1:], " "))
+			} else {
+				args = append(args, "--health-cmd", strings.Join(test, " "))
+			}
+		}
+		if service.HealthCheck.Interval != nil {
+			args = append(args, "--health-interval", service.HealthCheck.Interval.String())
+		}
+		if service.HealthCheck.Timeout != nil {
+			args = append(args, "--health-timeout", service.HealthCheck.Timeout.String())
+		}
+		if service.HealthCheck.Retries != nil {
+			args = append(args, "--health-retries", fmt.Sprintf("%d", *service.HealthCheck.Retries))
+		}
+		if service.HealthCheck.StartPeriod != nil {
+			args = append(args, "--health-start-period", service.HealthCheck.StartPeriod.String())
+		}
+	}
+
+	// Links: legacy service linking via DNS aliases.
+	// Format: "service" or "service:alias". We add --add-host entries so the
+	// alias resolves to the linked service's container hostname.
+	for _, link := range service.Links {
+		parts := strings.SplitN(link, ":", 2)
+		linkedService := parts[0]
+		alias := linkedService
+		if len(parts) == 2 {
+			alias = parts[1]
+		}
+		// The linked service's hostname equals its service name (set via --hostname).
+		// We add an alias pointing to the linked service name so DNS resolves it.
+		args = append(args, "--add-host", alias+":"+linkedService)
+	}
+
 	// Image (required, always last before command)
 	args = append(args, service.Image)
 
