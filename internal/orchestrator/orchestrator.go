@@ -58,13 +58,28 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 		return fmt.Errorf("resolving dependencies: %w", err)
 	}
 
+	rm := newRestartMonitor(o.driver)
+
 	for _, serviceName := range order {
 		service := project.Services[serviceName]
-		o.logger.Infof("Starting service %s", serviceName)
+
+		// Wait for dependencies (health check aware)
+		if err := o.waitForDependencies(ctx, project.Name, service, serviceName); err != nil {
+			return fmt.Errorf("waiting for dependencies of %s: %w", serviceName, err)
+		}
+
+		restartInfo := formatRestartInfo(service.Restart)
+		o.logger.Infof("Starting service %s%s", serviceName, restartInfo)
 
 		args := converter.ContainerRunArgs(project.Name, service, serviceName, 1)
 		if err := o.driver.RunContainer(ctx, args); err != nil {
 			return fmt.Errorf("starting service %s: %w", serviceName, err)
+		}
+
+		// Start restart monitor in background if policy is set
+		policy := parseRestartPolicy(service.Restart)
+		if policy != RestartNo {
+			go rm.monitorAndRestart(ctx, project.Name, serviceName, policy, args)
 		}
 
 		o.logger.Successf("Service %s started", serviceName)
