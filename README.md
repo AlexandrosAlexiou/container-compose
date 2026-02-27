@@ -29,8 +29,17 @@ container-compose up
 # Start in background
 container-compose up -d
 
+# Build images before starting
+container-compose up --build
+
+# Scale a service to multiple replicas
+container-compose up --scale worker=3
+
 # Stop and remove all services
 container-compose down
+
+# Remove volumes on down
+container-compose down -v
 
 # List running services
 container-compose ps
@@ -39,14 +48,18 @@ container-compose ps
 container-compose logs
 container-compose logs -f web
 
+# Build images
+container-compose build
+container-compose build api
+
+# Execute a command in a running container
+container-compose exec db psql -U postgres
+
 # Use a specific compose file
 container-compose -f my-compose.yml up -d
 
 # Specify project name
 container-compose -p myapp up -d
-
-# Remove volumes on down
-container-compose down -v
 ```
 
 ## Supported Compose Features
@@ -65,8 +78,9 @@ container-compose down -v
 | `working_dir` | ✅ |
 | `user` | ✅ |
 | `depends_on` (ordering) | ✅ |
+| `depends_on` (service_healthy) | ✅ |
 | `cpus` / `mem_limit` | ✅ |
-| `dns` | ✅ |
+| `dns` / `dns_search` | ✅ |
 | `init` | ✅ |
 | `read_only` | ✅ |
 | `tmpfs` | ✅ |
@@ -75,10 +89,12 @@ container-compose down -v
 | `hostname` | ✅ |
 | `profiles` | ✅ |
 | `extends` / `includes` | ✅ (via compose-go) |
-| `healthcheck` (condition wait) | 🚧 Planned |
-| `restart` policies | 🚧 Planned |
+| `restart` policies | ✅ |
+| `deploy.replicas` | ✅ |
+| DNS service discovery | ✅ (via hostname + shared network) |
+| Port conflict detection | ✅ |
 | `secrets` / `configs` | 🚧 Planned |
-| `deploy.replicas` | 🚧 Planned |
+| Multiple networks per service | ⚠️ First network only |
 | `privileged` / `cap_add` | ❌ N/A (VM isolation) |
 | `devices` | ❌ N/A |
 | `network_mode: host` | ❌ N/A (separate VMs) |
@@ -126,6 +142,28 @@ container-compose ps
 container-compose logs -f api
 container-compose down -v
 ```
+
+## Service Discovery
+
+Services on the same network automatically resolve each other by service name. In this example, the `api` service can connect to `db` using hostname `db`:
+
+```yaml
+services:
+  api:
+    image: myapi
+    environment:
+      DATABASE_URL: postgres://db:5432/myapp
+    depends_on:
+      - db
+
+  db:
+    image: postgres:16
+```
+
+This works because `container-compose`:
+1. Sets each container's `--hostname` to its service name
+2. Places all services without explicit networks on the project's default network
+3. Apple Container's built-in DNS resolves hostnames within the same network
 
 ## Architecture
 
