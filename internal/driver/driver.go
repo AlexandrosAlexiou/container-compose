@@ -374,11 +374,63 @@ func (d *Driver) InspectContainer(ctx context.Context, name string) (map[string]
 		return nil, fmt.Errorf("container inspect %s failed: %w\n%s", name, err, stderr.String())
 	}
 
-	var result map[string]interface{}
-	if err := json.Unmarshal(out, &result); err != nil {
-		return nil, fmt.Errorf("parsing inspect output: %w", err)
+	// Apple Container inspect returns a JSON array with one element
+	var arr []map[string]interface{}
+	if err := json.Unmarshal(out, &arr); err != nil {
+		// Fallback: try parsing as single object
+		var result map[string]interface{}
+		if err2 := json.Unmarshal(out, &result); err2 != nil {
+			return nil, fmt.Errorf("parsing inspect output: %w", err)
+		}
+		return result, nil
 	}
-	return result, nil
+	if len(arr) == 0 {
+		return nil, fmt.Errorf("inspect returned empty result for %s", name)
+	}
+	return arr[0], nil
+}
+
+// GetContainerIP returns the IPv4 address of a container (without CIDR mask).
+func (d *Driver) GetContainerIP(ctx context.Context, name string) (string, error) {
+	info, err := d.InspectContainer(ctx, name)
+	if err != nil {
+		return "", err
+	}
+
+	networks, ok := info["networks"].([]interface{})
+	if !ok || len(networks) == 0 {
+		return "", fmt.Errorf("no networks found for container %s", name)
+	}
+
+	net, ok := networks[0].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("invalid network info for container %s", name)
+	}
+
+	ipCIDR, _ := net["ipv4Address"].(string)
+	if ipCIDR == "" {
+		return "", fmt.Errorf("no IPv4 address for container %s", name)
+	}
+
+	// Strip CIDR notation (e.g., "192.168.64.2/24" -> "192.168.64.2")
+	ip := strings.Split(ipCIDR, "/")[0]
+	return ip, nil
+}
+
+// ExecSimple runs a command in a container and returns stdout output.
+func (d *Driver) ExecSimple(ctx context.Context, containerName string, command []string) (string, error) {
+	args := []string{"exec", containerName}
+	args = append(args, command...)
+
+	cmd := exec.CommandContext(ctx, containerBinary, args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("exec in %s failed: %w\n%s", containerName, err, stderr.String())
+	}
+	return stdout.String(), nil
 }
 
 // StatsContainer shows resource usage stats for a container.

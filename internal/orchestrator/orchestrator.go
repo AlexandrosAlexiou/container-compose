@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/apple/container-compose/internal/converter"
@@ -129,6 +130,11 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 			monCancel()
 			return err
 		}
+	}
+
+	// 5. Set up service discovery (/etc/hosts entries for service name resolution)
+	if err := o.setupServiceDiscovery(ctx, project, opts.Scale); err != nil {
+		o.logger.Warnf("Service discovery setup partially failed: %v", err)
 	}
 
 	return nil
@@ -295,5 +301,69 @@ func (o *Orchestrator) buildImages(ctx context.Context, project *types.Project) 
 			return fmt.Errorf("building %s: %w", name, err)
 		}
 	}
+	return nil
+}
+
+// setupServiceDiscovery injects /etc/hosts entries into all containers so that
+// services can resolve each other by service name (Docker Compose compatibility).
+// Apple Container doesn't support --hostname and its built-in DNS requires PF rules
+// that need sudo, so we use /etc/hosts injection as a reliable workaround.
+func (o *Orchestrator) setupServiceDiscovery(ctx context.Context, project *types.Project, scaleMap map[string]int) error {
+	type hostEntry struct {
+		ip          string
+		serviceName string
+		container   string
+	}
+
+	var entries []hostEntry
+	var containerNames []string
+
+	// Collect IPs for all running containers
+	for serviceName, service := range project.Services {
+		replicas := replicaCount(serviceName, service, scaleMap)
+		for i := 1; i <= replicas; i++ {
+			containerName := converter.ContainerName(project.Name, serviceName, i)
+			ip, err := o.driver.GetContainerIP(ctx, containerName)
+			if err != nil {
+				o.logger.Warnf("Cannot get IP for %s: %v", containerName, err)
+				continue
+			}
+			entries = append(entries, hostEntry{
+				ip:          ip,
+				serviceName: serviceName,
+				container:   containerName,
+			})
+			containerNames = append(containerNames, containerName)
+		}
+	}
+
+	if len(entries) < 2 {
+		return nil // No point in service discovery with 0-1 containers
+	}
+
+	// Build hosts content: each entry maps service name AND container name to IP
+	var hostsLines []string
+	for _, e := range entries {
+		// Map both the service name and the container name to the IP
+		hostsLines = append(hostsLines, fmt.Sprintf("%s %s %s", e.ip, e.serviceName, e.container))
+	}
+	hostsContent := strings.Join(hostsLines, "\n")
+
+	// Inject into each container via shell (append to /etc/hosts)
+	o.logger.Infof("Setting up service discovery for %d containers", len(containerNames))
+	for _, containerName := range containerNames {
+		// Use sh -c with echo to append entries, handling the case where sh exists
+		shellCmd := fmt.Sprintf("echo '%s' >> /etc/hosts", hostsContent)
+		_, err := o.driver.ExecSimple(ctx, containerName, []string{"sh", "-c", shellCmd})
+		if err != nil {
+			// Try with /bin/sh explicitly
+			_, err = o.driver.ExecSimple(ctx, containerName, []string{"/bin/sh", "-c", shellCmd})
+			if err != nil {
+				o.logger.Warnf("Cannot inject hosts into %s: %v", containerName, err)
+			}
+		}
+	}
+
+	o.logger.Successf("Service discovery configured (%d services)", len(entries))
 	return nil
 }
