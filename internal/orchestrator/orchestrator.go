@@ -21,6 +21,7 @@ type Orchestrator struct {
 type UpOptions struct {
 	Detach bool
 	Build  bool
+	Scale  map[string]int // service name -> replica count
 }
 
 // DownOptions configures the down operation.
@@ -36,6 +37,11 @@ func New(d *driver.Driver, logger *output.Logger) *Orchestrator {
 
 // Up creates and starts all services in dependency order.
 func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOptions) error {
+	// 0. Validate port conflicts
+	if err := checkPortConflicts(project, opts.Scale); err != nil {
+		return err
+	}
+
 	// 1. Create networks
 	if err := o.createNetworks(ctx, project); err != nil {
 		return fmt.Errorf("creating networks: %w", err)
@@ -73,22 +79,30 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 			return fmt.Errorf("waiting for dependencies of %s: %w", serviceName, err)
 		}
 
+		replicas := replicaCount(serviceName, service, opts.Scale)
 		restartInfo := formatRestartInfo(service.Restart)
-		o.logger.Infof("Starting service %s%s", serviceName, restartInfo)
 
-		args := converter.ContainerRunArgs(project.Name, service, serviceName, 1)
-		if err := o.driver.RunContainer(ctx, args); err != nil {
-			monCancel()
-			return fmt.Errorf("starting service %s: %w", serviceName, err)
+		for i := 1; i <= replicas; i++ {
+			suffix := ""
+			if replicas > 1 {
+				suffix = fmt.Sprintf(" (%d/%d)", i, replicas)
+			}
+			o.logger.Infof("Starting service %s%s%s", serviceName, suffix, restartInfo)
+
+			args := converter.ContainerRunArgs(project.Name, service, serviceName, i)
+			if err := o.driver.RunContainer(ctx, args); err != nil {
+				monCancel()
+				return fmt.Errorf("starting service %s replica %d: %w", serviceName, i, err)
+			}
+
+			// Start restart monitor in background if policy is set
+			policy := parseRestartPolicy(service.Restart)
+			if policy != RestartNo {
+				go rm.monitorAndRestart(monCtx, project.Name, serviceName, policy, args)
+			}
 		}
 
-		// Start restart monitor in background if policy is set
-		policy := parseRestartPolicy(service.Restart)
-		if policy != RestartNo {
-			go rm.monitorAndRestart(monCtx, project.Name, serviceName, policy, args)
-		}
-
-		o.logger.Successf("Service %s started", serviceName)
+		o.logger.Successf("Service %s started (%d replica(s))", serviceName, replicas)
 	}
 
 	return nil
@@ -107,19 +121,36 @@ func (o *Orchestrator) Down(ctx context.Context, project *types.Project, opts Do
 		return fmt.Errorf("resolving dependencies: %w", err)
 	}
 
-	// Reverse order for teardown
+	// Reverse order for teardown — stop all replicas of each service
 	for i := len(order) - 1; i >= 0; i-- {
 		serviceName := order[i]
-		containerName := converter.ContainerName(project.Name, serviceName, 1)
 
 		o.logger.Infof("Stopping service %s", serviceName)
 
-		if err := o.driver.StopContainer(ctx, containerName); err != nil {
-			o.logger.Warnf("Failed to stop %s: %v", serviceName, err)
+		// Find all running replicas via listing
+		containers, _ := o.driver.ListContainers(ctx, project.Name)
+		stopped := false
+		for _, c := range containers {
+			if c.Service == serviceName {
+				if err := o.driver.StopContainer(ctx, c.Name); err != nil {
+					o.logger.Warnf("Failed to stop %s: %v", c.Name, err)
+				}
+				if err := o.driver.DeleteContainer(ctx, c.Name); err != nil {
+					o.logger.Warnf("Failed to remove %s: %v", c.Name, err)
+				}
+				stopped = true
+			}
 		}
 
-		if err := o.driver.DeleteContainer(ctx, containerName); err != nil {
-			o.logger.Warnf("Failed to remove %s: %v", serviceName, err)
+		// Fallback: try the default name if listing didn't find anything
+		if !stopped {
+			containerName := converter.ContainerName(project.Name, serviceName, 1)
+			if err := o.driver.StopContainer(ctx, containerName); err != nil {
+				o.logger.Warnf("Failed to stop %s: %v", serviceName, err)
+			}
+			if err := o.driver.DeleteContainer(ctx, containerName); err != nil {
+				o.logger.Warnf("Failed to remove %s: %v", serviceName, err)
+			}
 		}
 	}
 
