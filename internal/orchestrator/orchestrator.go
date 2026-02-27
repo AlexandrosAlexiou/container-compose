@@ -12,8 +12,9 @@ import (
 
 // Orchestrator manages the lifecycle of a compose project.
 type Orchestrator struct {
-	driver *driver.Driver
-	logger *output.Logger
+	driver    *driver.Driver
+	logger    *output.Logger
+	cancelMon context.CancelFunc // cancels restart monitors
 }
 
 // UpOptions configures the up operation.
@@ -58,6 +59,9 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 		return fmt.Errorf("resolving dependencies: %w", err)
 	}
 
+	// Separate long-lived context for restart monitors (cancelled on Down)
+	monCtx, monCancel := context.WithCancel(context.Background())
+	o.cancelMon = monCancel
 	rm := newRestartMonitor(o.driver)
 
 	for _, serviceName := range order {
@@ -65,6 +69,7 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 
 		// Wait for dependencies (health check aware)
 		if err := o.waitForDependencies(ctx, project.Name, service, serviceName); err != nil {
+			monCancel()
 			return fmt.Errorf("waiting for dependencies of %s: %w", serviceName, err)
 		}
 
@@ -73,13 +78,14 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 
 		args := converter.ContainerRunArgs(project.Name, service, serviceName, 1)
 		if err := o.driver.RunContainer(ctx, args); err != nil {
+			monCancel()
 			return fmt.Errorf("starting service %s: %w", serviceName, err)
 		}
 
 		// Start restart monitor in background if policy is set
 		policy := parseRestartPolicy(service.Restart)
 		if policy != RestartNo {
-			go rm.monitorAndRestart(ctx, project.Name, serviceName, policy, args)
+			go rm.monitorAndRestart(monCtx, project.Name, serviceName, policy, args)
 		}
 
 		o.logger.Successf("Service %s started", serviceName)
@@ -90,6 +96,11 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 
 // Down stops and removes all services, networks, and optionally volumes.
 func (o *Orchestrator) Down(ctx context.Context, project *types.Project, opts DownOptions) error {
+	// Cancel any active restart monitors
+	if o.cancelMon != nil {
+		o.cancelMon()
+	}
+
 	// 1. Stop and remove containers in reverse dependency order
 	order, err := dependencyOrder(project)
 	if err != nil {
@@ -112,12 +123,17 @@ func (o *Orchestrator) Down(ctx context.Context, project *types.Project, opts Do
 		}
 	}
 
-	// 2. Remove networks
+	// 2. Remove networks (including default)
+	defaultNet := converter.NetworkName(project.Name, "default")
 	for name := range project.Networks {
 		networkName := converter.NetworkName(project.Name, name)
 		if err := o.driver.DeleteNetwork(ctx, networkName); err != nil {
 			o.logger.Warnf("Failed to remove network %s: %v", networkName, err)
 		}
+	}
+	// Always try to remove the default network
+	if err := o.driver.DeleteNetwork(ctx, defaultNet); err != nil {
+		o.logger.Warnf("Failed to remove network %s: %v", defaultNet, err)
 	}
 
 	// 3. Remove volumes if requested
@@ -135,17 +151,25 @@ func (o *Orchestrator) Down(ctx context.Context, project *types.Project, opts Do
 }
 
 func (o *Orchestrator) createNetworks(ctx context.Context, project *types.Project) error {
-	// Always create a default network
 	defaultNet := converter.NetworkName(project.Name, "default")
-	if err := o.driver.CreateNetwork(ctx, defaultNet); err != nil {
-		return err
+
+	// Check if any service needs the default network (no explicit networks defined)
+	needsDefault := false
+	for _, service := range project.Services {
+		if len(service.Networks) == 0 {
+			needsDefault = true
+			break
+		}
+	}
+
+	if needsDefault {
+		if err := o.driver.CreateNetwork(ctx, defaultNet); err != nil {
+			return err
+		}
 	}
 
 	for name := range project.Networks {
 		networkName := converter.NetworkName(project.Name, name)
-		if networkName == defaultNet {
-			continue
-		}
 		if err := o.driver.CreateNetwork(ctx, networkName); err != nil {
 			return err
 		}

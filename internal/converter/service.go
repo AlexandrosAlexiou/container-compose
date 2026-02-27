@@ -54,10 +54,17 @@ func ContainerRunArgs(projectName string, service types.ServiceConfig, serviceNa
 		args = append(args, "--tmpfs", tmpfs)
 	}
 
-	// Networks
-	for network := range service.Networks {
-		networkName := NetworkName(projectName, network)
-		args = append(args, "--network", networkName)
+	// Networks: only one can be attached at run time; extras need post-create connect
+	// We store the full list so the driver can handle multi-network attachment.
+	if len(service.Networks) > 0 {
+		// Pick the first network for `run --network`
+		for network := range service.Networks {
+			args = append(args, "--network", NetworkName(projectName, network))
+			break
+		}
+	} else {
+		// Services without explicit networks join the project default network
+		args = append(args, "--network", NetworkName(projectName, "default"))
 	}
 
 	// Working directory
@@ -70,9 +77,9 @@ func ContainerRunArgs(projectName string, service types.ServiceConfig, serviceNa
 		args = append(args, "-u", service.User)
 	}
 
-	// Entrypoint
+	// Entrypoint: only the executable; extra args become part of the command
 	if len(service.Entrypoint) > 0 {
-		args = append(args, "--entrypoint", strings.Join(service.Entrypoint, " "))
+		args = append(args, "--entrypoint", service.Entrypoint[0])
 	}
 
 	// CPU limit
@@ -105,10 +112,12 @@ func ContainerRunArgs(projectName string, service types.ServiceConfig, serviceNa
 		args = append(args, "--platform", service.Platform)
 	}
 
-	// Hostname
-	if service.Hostname != "" {
-		args = append(args, "--hostname", service.Hostname)
+	// Hostname: default to service name for DNS discovery between services
+	hostname := service.Hostname
+	if hostname == "" {
+		hostname = serviceName
 	}
+	args = append(args, "--hostname", hostname)
 
 	// Image (required, always last before command)
 	args = append(args, service.Image)
@@ -174,4 +183,22 @@ func formatVolume(projectName string, vol types.ServiceVolumeConfig) string {
 	}
 
 	return result
+}
+
+// ExtraNetworks returns the networks beyond the first one that need post-create attachment.
+func ExtraNetworks(projectName string, service types.ServiceConfig) []string {
+	if len(service.Networks) <= 1 {
+		return nil
+	}
+
+	first := true
+	var extras []string
+	for network := range service.Networks {
+		if first {
+			first = false
+			continue
+		}
+		extras = append(extras, NetworkName(projectName, network))
+	}
+	return extras
 }
