@@ -1,0 +1,10 @@
+# Custom network
+services:
+  app:
+    image: alpine:latest
+    command: ["sleep", "300"]
+    networks:
+      - frontend
+
+networks:
+  frontend:

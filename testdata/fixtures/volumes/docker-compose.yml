@@ -1,0 +1,10 @@
+# Named volumes
+services:
+  app:
+    image: alpine:latest
+    command: ["sleep", "300"]
+    volumes:
+      - data:/data
+
+volumes:
+  data:

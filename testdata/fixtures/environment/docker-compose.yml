@@ -1,0 +1,11 @@
+# Environment variables and port mapping
+services:
+  web:
+    image: alpine:latest
+    command: ["sleep", "300"]
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      SECRET_KEY: s3cr3t
+    ports:
+      - "9091:80"

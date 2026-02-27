@@ -1,0 +1,11 @@
+# Two services with dependency ordering
+services:
+  backend:
+    image: alpine:latest
+    command: ["sleep", "300"]
+
+  frontend:
+    image: alpine:latest
+    command: ["sleep", "300"]
+    depends_on:
+      - backend

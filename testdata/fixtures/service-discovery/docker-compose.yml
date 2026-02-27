@@ -1,0 +1,11 @@
+# Service discovery: services resolve each other by name
+services:
+  server:
+    image: alpine:latest
+    command: ["sleep", "300"]
+
+  client:
+    image: alpine:latest
+    command: ["sleep", "300"]
+    depends_on:
+      - server

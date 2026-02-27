@@ -1,0 +1,5 @@
+# Simple single-service compose file
+services:
+  hello:
+    image: alpine:latest
+    command: ["sh", "-c", "echo 'hello from container-compose' && sleep 300"]
