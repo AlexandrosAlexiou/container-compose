@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/apple/container-compose/internal/converter"
 	"github.com/apple/container-compose/internal/driver"
@@ -53,8 +54,10 @@ func newUpCmd() *cobra.Command {
 				logger.Infof("All services started. Press Ctrl+C to stop.")
 				<-ctx.Done()
 				logger.Infof("\nGracefully stopping...")
-				// Use a fresh context for shutdown
-				return orch.Down(context.Background(), project, orchestrator.DownOptions{
+				// Use a fresh context with a timeout for shutdown
+				shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer shutdownCancel()
+				return orch.Down(shutdownCtx, project, orchestrator.DownOptions{
 					RemoveOrphans: false,
 				})
 			}

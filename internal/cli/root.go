@@ -24,6 +24,8 @@ func init() {
 	rootCmd.AddCommand(newDownCmd())
 	rootCmd.AddCommand(newPsCmd())
 	rootCmd.AddCommand(newLogsCmd())
+	rootCmd.AddCommand(newBuildCmd())
+	rootCmd.AddCommand(newExecCmd())
 }
 
 func Execute() error {

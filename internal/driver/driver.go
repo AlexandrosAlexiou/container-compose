@@ -245,6 +245,39 @@ func (d *Driver) BuildImage(ctx context.Context, contextPath string, dockerfile 
 	return cmd.Run()
 }
 
+// ExecOptions configures exec operations.
+type ExecOptions struct {
+	Detach  bool
+	User    string
+	Workdir string
+}
+
+// ExecContainer executes a command in a running container.
+func (d *Driver) ExecContainer(ctx context.Context, containerName string, command []string, opts ExecOptions) error {
+	args := []string{"exec"}
+
+	if opts.Detach {
+		args = append(args, "-d")
+	}
+	if opts.User != "" {
+		args = append(args, "-u", opts.User)
+	}
+	if opts.Workdir != "" {
+		args = append(args, "-w", opts.Workdir)
+	}
+
+	args = append(args, containerName)
+	args = append(args, command...)
+
+	d.logger.Debugf("Exec: %s %s", containerBinary, strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, containerBinary, args...)
+	cmd.Stdout = d.logger.Stdout()
+	cmd.Stderr = d.logger.Stderr()
+	cmd.Stdin = nil // TODO: support interactive mode
+
+	return cmd.Run()
+}
+
 func extractServiceFromName(containerName, projectName string) string {
 	// Container name format: project-service-replica
 	trimmed := strings.TrimPrefix(containerName, projectName+"-")
