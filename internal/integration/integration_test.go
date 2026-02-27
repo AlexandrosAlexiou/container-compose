@@ -560,4 +560,22 @@ func TestFullFeatures(t *testing.T) {
 	if err != nil {
 		t.Errorf("worker not running (depends_on service_started): %v\n%s", err, out)
 	}
+
+	// 13. env_file: worker should have env vars from worker.env
+	out, err = containerExec(t, workerContainer, "printenv", "WORKER_MODE")
+	if err != nil {
+		t.Errorf("printenv WORKER_MODE failed: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(out) != "background" {
+		t.Errorf("expected WORKER_MODE=background from env_file, got: %s", out)
+	}
+
+	// 14. command: db's command should have created /tmp/health
+	out, err = containerExec(t, "test-db", "cat", "/tmp/health")
+	if err != nil {
+		t.Errorf("command did not run (expected /tmp/health): %v", err)
+	}
+	if !strings.Contains(out, "ready") {
+		t.Errorf("expected 'ready' in /tmp/health, got: %s", out)
+	}
 }

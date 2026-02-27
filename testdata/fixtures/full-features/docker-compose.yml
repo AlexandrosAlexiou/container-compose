@@ -40,6 +40,8 @@ services:
 
   worker:
     image: alpine:latest
+    env_file:
+      - worker.env
     depends_on:
       db:
         condition: service_started
