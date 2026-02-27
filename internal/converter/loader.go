@@ -35,7 +35,8 @@ func LoadProject(opts ProjectOptions) (*types.Project, error) {
 		cliOpts = append(cliOpts, cli.WithEnvFiles(opts.EnvFiles...))
 	}
 
-	if len(opts.ConfigPaths) > 0 {
+	// When no config paths are explicitly given, allow env-based discovery (COMPOSE_FILE)
+	if len(opts.ConfigPaths) == 0 {
 		cliOpts = append(cliOpts, cli.WithConfigFileEnv)
 	}
 

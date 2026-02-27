@@ -37,12 +37,81 @@ func TestContainerRunArgs(t *testing.T) {
 		"-v /host/data:/data",
 		"-l com.docker.compose.project=myproject",
 		"-l com.docker.compose.service=web",
+		"--hostname web",                          // DNS: defaults to service name
+		"--network myproject_default",             // default network when none specified
 	}
 
 	for _, check := range checks {
 		if !strings.Contains(argsStr, check) {
 			t.Errorf("expected args to contain %q, got: %s", check, argsStr)
 		}
+	}
+}
+
+func TestContainerRunArgsEntrypoint(t *testing.T) {
+	service := types.ServiceConfig{
+		Image:      "myimage",
+		Entrypoint: types.ShellCommand{"/bin/sh", "-c", "echo hello"},
+	}
+
+	args := ContainerRunArgs("proj", service, "svc", 1)
+	argsStr := strings.Join(args, " ")
+
+	// Only the executable should be passed to --entrypoint
+	if !strings.Contains(argsStr, "--entrypoint /bin/sh") {
+		t.Errorf("expected --entrypoint /bin/sh, got: %s", argsStr)
+	}
+	// Should NOT contain the joined form
+	if strings.Contains(argsStr, "--entrypoint /bin/sh -c echo hello") {
+		t.Errorf("entrypoint should only be the executable, got: %s", argsStr)
+	}
+}
+
+func TestContainerRunArgsExplicitNetwork(t *testing.T) {
+	service := types.ServiceConfig{
+		Image: "nginx",
+		Networks: map[string]*types.ServiceNetworkConfig{
+			"frontend": nil,
+		},
+	}
+
+	args := ContainerRunArgs("proj", service, "web", 1)
+	argsStr := strings.Join(args, " ")
+
+	if !strings.Contains(argsStr, "--network proj_frontend") {
+		t.Errorf("expected --network proj_frontend, got: %s", argsStr)
+	}
+	// Should NOT contain the default network
+	if strings.Contains(argsStr, "proj_default") {
+		t.Errorf("should not include default network when explicit network set, got: %s", argsStr)
+	}
+}
+
+func TestContainerRunArgsCustomHostname(t *testing.T) {
+	service := types.ServiceConfig{
+		Image:    "nginx",
+		Hostname: "myhost",
+	}
+
+	args := ContainerRunArgs("proj", service, "web", 1)
+	argsStr := strings.Join(args, " ")
+
+	if !strings.Contains(argsStr, "--hostname myhost") {
+		t.Errorf("expected custom hostname, got: %s", argsStr)
+	}
+}
+
+func TestExtraNetworks(t *testing.T) {
+	service := types.ServiceConfig{
+		Networks: map[string]*types.ServiceNetworkConfig{
+			"frontend": nil,
+			"backend":  nil,
+		},
+	}
+
+	extras := ExtraNetworks("proj", service)
+	if len(extras) != 1 {
+		t.Errorf("expected 1 extra network, got %d", len(extras))
 	}
 }
 
