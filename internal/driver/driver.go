@@ -84,6 +84,20 @@ func (d *Driver) DeleteContainer(ctx context.Context, name string) error {
 	return nil
 }
 
+// ForceDeleteContainer force-removes a container even if it's running.
+func (d *Driver) ForceDeleteContainer(ctx context.Context, name string) error {
+	d.logger.Debugf("Force deleting container: %s", name)
+	cmd := exec.CommandContext(ctx, containerBinary, "delete", "--force", name)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("container delete --force %s failed: %w\n%s", name, err, stderr.String())
+	}
+	return nil
+}
+
 // CreateNetwork creates a network.
 func (d *Driver) CreateNetwork(ctx context.Context, name string) error {
 	d.logger.Infof("Creating network %s", name)

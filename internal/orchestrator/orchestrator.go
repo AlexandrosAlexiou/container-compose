@@ -105,6 +105,12 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 					}
 					o.logger.Infof("Starting service %s%s%s", svcName, suffix, restartInfo)
 
+					containerName := converter.ContainerName(project.Name, svcName, i)
+
+					// Remove any existing container with the same name
+					_ = o.driver.StopContainer(ctx, containerName)
+					_ = o.driver.ForceDeleteContainer(ctx, containerName)
+
 					args := converter.ContainerRunArgsWithProject(project.Name, svc, svcName, i, project)
 					if err := o.driver.RunContainer(ctx, args); err != nil {
 						errCh <- fmt.Errorf("starting service %s replica %d: %w", svcName, i, err)
