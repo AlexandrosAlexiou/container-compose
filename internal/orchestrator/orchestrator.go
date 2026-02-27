@@ -146,6 +146,9 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 		o.logger.Warnf("Service discovery setup partially failed: %v", err)
 	}
 
+	// 6. Apply shm_size by remounting /dev/shm with the correct size
+	o.applyShmSize(ctx, project, opts.Scale)
+
 	return nil
 }
 
@@ -284,6 +287,38 @@ func (o *Orchestrator) findService(projectName, serviceName string) *types.Servi
 		return &svc
 	}
 	return nil
+}
+
+// applyShmSize remounts /dev/shm with the requested size for services that
+// specify shm_size. Apple Container doesn't support --shm-size natively,
+// so we remount after the container starts.
+func (o *Orchestrator) applyShmSize(ctx context.Context, project *types.Project, scaleMap map[string]int) {
+	for serviceName, service := range project.Services {
+		if service.ShmSize <= 0 {
+			continue
+		}
+
+		shmSizeMB := service.ShmSize / (1024 * 1024)
+		if shmSizeMB < 1 {
+			shmSizeMB = 1
+		}
+
+		replicas := replicaCount(serviceName, service, scaleMap)
+		for i := 1; i <= replicas; i++ {
+			containerName := converter.ContainerName(project.Name, serviceName, i)
+			if service.ContainerName != "" {
+				containerName = service.ContainerName
+			}
+
+			cmd := fmt.Sprintf("mount -t tmpfs -o size=%dm tmpfs /dev/shm", shmSizeMB)
+			_, err := o.driver.ExecSimple(ctx, containerName, []string{"sh", "-c", cmd})
+			if err != nil {
+				o.logger.Warnf("Cannot set shm_size for %s: %v", containerName, err)
+			} else {
+				o.logger.Debugf("Set /dev/shm to %dMB for %s", shmSizeMB, containerName)
+			}
+		}
+	}
 }
 
 func (o *Orchestrator) buildImages(ctx context.Context, project *types.Project) error {

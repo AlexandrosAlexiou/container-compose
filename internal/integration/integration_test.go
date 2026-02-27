@@ -355,3 +355,102 @@ func TestLogs(t *testing.T) {
 	// The simple container prints "hello from container-compose"
 	t.Logf("Logs output:\n%s", out)
 }
+
+func TestHostname(t *testing.T) {
+	requireContainerRuntime(t)
+	fixture := "hostname"
+	defer composeDown(t, fixture)
+
+	composeUp(t, fixture)
+
+	clientContainer := "hostname-client-1"
+
+	// Verify the hostname alias is in /etc/hosts
+	out, err := containerExec(t, clientContainer, "cat", "/etc/hosts")
+	if err != nil {
+		t.Fatalf("cat /etc/hosts failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "myserver") {
+		t.Errorf("/etc/hosts should contain 'myserver' hostname alias, got:\n%s", out)
+	}
+
+	// Verify client can resolve the hostname alias
+	out, err = containerExec(t, clientContainer, "getent", "hosts", "myserver")
+	if err != nil {
+		t.Fatalf("getent hosts myserver failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "myserver") {
+		t.Errorf("getent should resolve 'myserver', got: %s", out)
+	}
+
+	// Verify the server's /etc/hostname is set
+	serverContainer := "hostname-server-1"
+	out, err = containerExec(t, serverContainer, "cat", "/etc/hostname")
+	if err != nil {
+		t.Logf("cat /etc/hostname warning (may not exist): %v", err)
+	} else if !strings.Contains(out, "myserver") {
+		t.Errorf("/etc/hostname should contain 'myserver', got: %s", out)
+	}
+}
+
+func TestHostDockerInternal(t *testing.T) {
+	requireContainerRuntime(t)
+	fixture := "simple"
+	defer composeDown(t, fixture)
+
+	composeUp(t, fixture)
+
+	containerName := "simple-hello-1"
+
+	// Verify host.docker.internal is in /etc/hosts
+	out, err := containerExec(t, containerName, "cat", "/etc/hosts")
+	if err != nil {
+		t.Fatalf("cat /etc/hosts failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "host.docker.internal") {
+		t.Errorf("/etc/hosts should contain host.docker.internal, got:\n%s", out)
+	}
+	if !strings.Contains(out, "gateway.docker.internal") {
+		t.Errorf("/etc/hosts should contain gateway.docker.internal, got:\n%s", out)
+	}
+
+	// Verify host.docker.internal resolves to a valid IP
+	out, err = containerExec(t, containerName, "getent", "hosts", "host.docker.internal")
+	if err != nil {
+		t.Fatalf("getent hosts host.docker.internal failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "host.docker.internal") {
+		t.Errorf("getent should resolve host.docker.internal, got: %s", out)
+	}
+}
+
+func TestShmSize(t *testing.T) {
+	requireContainerRuntime(t)
+	fixture := "hostname"
+	defer composeDown(t, fixture)
+
+	composeUp(t, fixture)
+
+	bigmemContainer := "hostname-bigmem-1"
+
+	// Verify /dev/shm is remounted with the correct size (256MB)
+	out, err := containerExec(t, bigmemContainer, "df", "-m", "/dev/shm")
+	if err != nil {
+		t.Fatalf("df /dev/shm failed: %v\n%s", err, out)
+	}
+	t.Logf("/dev/shm mount info:\n%s", out)
+
+	// Should show 256MB, not the default 64MB
+	if !strings.Contains(out, "256") {
+		t.Errorf("expected /dev/shm to be 256MB, got:\n%s", out)
+	}
+
+	// Verify we can write to /dev/shm
+	out, err = containerExec(t, bigmemContainer, "sh", "-c", "echo test > /dev/shm/testfile && cat /dev/shm/testfile")
+	if err != nil {
+		t.Errorf("failed to write to /dev/shm: %v", err)
+	}
+	if !strings.Contains(out, "test") {
+		t.Errorf("expected 'test' from /dev/shm read, got: %s", out)
+	}
+}

@@ -206,7 +206,11 @@ func ContainerRunArgsWithProject(projectName string, service types.ServiceConfig
 		args = appendLabel(args, "com.docker.compose.domainname", service.DomainName)
 	}
 	if service.ShmSize > 0 {
-		args = appendLabel(args, "com.docker.compose.shm-size", fmt.Sprintf("%d", service.ShmSize))
+		// Apple Container's --tmpfs doesn't support size options, so we store
+		// the requested size as a label for documentation. The default /dev/shm
+		// (64MB) is always available inside containers.
+		shmSizeMB := service.ShmSize / (1024 * 1024)
+		args = appendLabel(args, "com.docker.compose.shm-size", fmt.Sprintf("%dm", shmSizeMB))
 	}
 	for k, v := range service.Annotations {
 		args = appendLabel(args, "com.docker.compose.annotation."+k, v)

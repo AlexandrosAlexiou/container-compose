@@ -1,0 +1,17 @@
+# Test hostname and shm_size support
+services:
+  server:
+    image: alpine:latest
+    hostname: myserver
+    command: ["sleep", "300"]
+
+  client:
+    image: alpine:latest
+    command: ["sleep", "300"]
+    depends_on:
+      - server
+
+  bigmem:
+    image: alpine:latest
+    shm_size: '256m'
+    command: ["sleep", "300"]

@@ -256,3 +256,75 @@ func TestExposeArgs(t *testing.T) {
 		t.Errorf("--expose should not be in args (not supported by container CLI), got: %s", argsStr)
 	}
 }
+
+func TestShmSizeMapping(t *testing.T) {
+	service := types.ServiceConfig{
+		Image:   "mssql:latest",
+		ShmSize: 3 * 1024 * 1024 * 1024, // 3GB in bytes
+	}
+
+	args := ContainerRunArgs("proj", service, "db", 1)
+	argsStr := strings.Join(args, " ")
+
+	// shm_size stored as label (Apple Container doesn't support --tmpfs size option)
+	if !strings.Contains(argsStr, "com.docker.compose.shm-size=3072m") {
+		t.Errorf("expected shm-size label with 3072m, got: %s", argsStr)
+	}
+}
+
+func TestShmSizeSmall(t *testing.T) {
+	service := types.ServiceConfig{
+		Image:   "app:latest",
+		ShmSize: 64 * 1024 * 1024, // 64MB
+	}
+
+	args := ContainerRunArgs("proj", service, "app", 1)
+	argsStr := strings.Join(args, " ")
+
+	if !strings.Contains(argsStr, "com.docker.compose.shm-size=64m") {
+		t.Errorf("expected shm-size label with 64m, got: %s", argsStr)
+	}
+}
+
+func TestShmSizeMinimum(t *testing.T) {
+	service := types.ServiceConfig{
+		Image:   "app:latest",
+		ShmSize: 100, // sub-MB
+	}
+
+	args := ContainerRunArgs("proj", service, "app", 1)
+	argsStr := strings.Join(args, " ")
+
+	if !strings.Contains(argsStr, "com.docker.compose.shm-size=0m") {
+		t.Errorf("expected shm-size label, got: %s", argsStr)
+	}
+}
+
+func TestShmSizeZero(t *testing.T) {
+	service := types.ServiceConfig{
+		Image:   "app:latest",
+		ShmSize: 0, // no shm_size
+	}
+
+	args := ContainerRunArgs("proj", service, "app", 1)
+	argsStr := strings.Join(args, " ")
+
+	if strings.Contains(argsStr, "com.docker.compose.shm-size") {
+		t.Errorf("should not add shm-size label when shm_size is 0, got: %s", argsStr)
+	}
+}
+
+func TestHostnameLabel(t *testing.T) {
+	service := types.ServiceConfig{
+		Image:    "azurite:latest",
+		Hostname: "azurite",
+	}
+
+	args := ContainerRunArgs("proj", service, "blob", 1)
+	argsStr := strings.Join(args, " ")
+
+	// Hostname stored as label for orchestrator to handle
+	if !strings.Contains(argsStr, "com.docker.compose.hostname=azurite") {
+		t.Errorf("expected hostname label, got: %s", argsStr)
+	}
+}
