@@ -253,9 +253,30 @@ services:
 ```
 
 This works because `container-compose`:
-1. Sets each container's `--hostname` to its service name
-2. Places all services without explicit networks on the project's default network
-3. Apple Container's built-in DNS resolves hostnames within the same network
+1. Inspects each container's IP address after startup
+2. Injects `/etc/hosts` entries into every container mapping service names to IPs
+3. Places all services without explicit networks on the project's default network
+
+This means `WORDPRESS_DB_HOST: db`, `DATABASE_URL: postgres://db:5432/myapp`, and similar patterns work out of the box — just like Docker Compose.
+
+## Testing
+
+```bash
+# Unit tests (no runtime needed)
+make test
+
+# Integration tests (requires running Apple Container runtime)
+make test-integration
+
+# Integration tests, skip heavy images (WordPress)
+make test-integration-short
+```
+
+Integration test fixtures are in `testdata/fixtures/` and cover:
+- Single service, multi-service with depends_on
+- Environment variables, named volumes, custom networks
+- Service discovery (hostname resolution between containers)
+- Full WordPress + MySQL stack (real-world compose file)
 
 ## Architecture
 
