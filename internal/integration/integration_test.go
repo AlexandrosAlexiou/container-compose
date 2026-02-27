@@ -454,3 +454,110 @@ func TestShmSize(t *testing.T) {
 		t.Errorf("expected 'test' from /dev/shm read, got: %s", out)
 	}
 }
+
+func TestFullFeatures(t *testing.T) {
+	requireContainerRuntime(t)
+	fixture := "full-features"
+	defer composeDown(t, fixture)
+
+	composeUp(t, fixture)
+
+	// 1. container_name: verify custom names are used
+	out, err := containerExec(t, "test-db", "echo", "alive")
+	if err != nil {
+		t.Fatalf("container_name 'test-db' not reachable: %v\n%s", err, out)
+	}
+
+	out, err = containerExec(t, "test-app", "echo", "alive")
+	if err != nil {
+		t.Fatalf("container_name 'test-app' not reachable: %v\n%s", err, out)
+	}
+
+	// 2. depends_on service_healthy: app started only after db healthcheck passed
+	//    If we got here, it means up succeeded and db was healthy before app started
+
+	// 3. user: verify UID
+	out, err = containerExec(t, "test-db", "id", "-u")
+	if err != nil {
+		t.Fatalf("id -u failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(strings.TrimSpace(out), "1000") {
+		t.Errorf("expected user 1000, got: %s", out)
+	}
+
+	// 4. read_only: app has read-only rootfs, writing should fail
+	_, err = containerExec(t, "test-app", "sh", "-c", "touch /testfile 2>&1")
+	if err == nil {
+		t.Error("expected write to fail on read-only rootfs")
+	}
+
+	// 5. anonymous volumes: /var/run should be writable even with read_only
+	_, err = containerExec(t, "test-app", "sh", "-c", "touch /var/run/testfile")
+	if err != nil {
+		t.Errorf("expected /var/run (tmpfs) to be writable on read_only container: %v", err)
+	}
+
+	// 6. named volume: db-data should be mounted
+	_, err = containerExec(t, "test-db", "sh", "-c", "echo test > /data/voltest && cat /data/voltest")
+	if err != nil {
+		t.Errorf("named volume /data not writable: %v", err)
+	}
+
+	// 7. environment: verify env vars
+	out, err = containerExec(t, "test-app", "printenv", "APP_MODE")
+	if err != nil {
+		t.Fatalf("printenv failed: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(out) != "production" {
+		t.Errorf("expected APP_MODE=production, got: %s", out)
+	}
+
+	// 8. host.docker.internal: GATEWAY env var should resolve
+	out, err = containerExec(t, "test-app", "printenv", "GATEWAY")
+	if err != nil {
+		t.Fatalf("printenv GATEWAY failed: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(out) != "host.docker.internal" {
+		t.Errorf("expected GATEWAY=host.docker.internal, got: %s", out)
+	}
+
+	// Verify host.docker.internal resolves
+	out, err = containerExec(t, "test-app", "getent", "hosts", "host.docker.internal")
+	if err != nil {
+		t.Errorf("host.docker.internal not resolvable: %v\n%s", err, out)
+	}
+
+	// 9. hostname: 'myapp' should be resolvable from other containers
+	out, err = containerExec(t, "test-db", "getent", "hosts", "myapp")
+	if err != nil {
+		t.Errorf("hostname 'myapp' not resolvable from db: %v\n%s", err, out)
+	}
+
+	// 10. service discovery: containers resolve each other by service name
+	out, err = containerExec(t, "test-app", "getent", "hosts", "db")
+	if err != nil {
+		t.Errorf("service name 'db' not resolvable from app: %v\n%s", err, out)
+	}
+
+	// Also by container_name
+	out, err = containerExec(t, "test-app", "getent", "hosts", "test-db")
+	if err != nil {
+		t.Errorf("container_name 'test-db' not resolvable from app: %v\n%s", err, out)
+	}
+
+	// 11. shm_size: verify /dev/shm is remounted to 128MB
+	out, err = containerExec(t, "test-db", "df", "-m", "/dev/shm")
+	if err != nil {
+		t.Fatalf("df /dev/shm failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "128") {
+		t.Errorf("expected /dev/shm at 128MB, got:\n%s", out)
+	}
+
+	// 12. depends_on service_started: worker should be running
+	workerContainer := "full-features-worker-1"
+	out, err = containerExec(t, workerContainer, "echo", "alive")
+	if err != nil {
+		t.Errorf("worker not running (depends_on service_started): %v\n%s", err, out)
+	}
+}

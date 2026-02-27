@@ -1,0 +1,50 @@
+# Comprehensive test: all features used by webshop compose
+services:
+  db:
+    image: alpine:latest
+    container_name: test-db
+    command: ["sh", "-c", "echo ready > /tmp/health && sleep 300"]
+    user: "1000:1000"
+    shm_size: '128m'
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    volumes:
+      - db-data:/data
+      - /var/run
+      - /var/tmp
+    healthcheck:
+      test: ["CMD-SHELL", "cat /tmp/health"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  app:
+    image: alpine:latest
+    container_name: test-app
+    hostname: myapp
+    read_only: true
+    user: "1000:1000"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - DB_HOST=test-db
+      - APP_MODE=production
+      - GATEWAY=${DOCKER_GATEWAY_HOST:-host.docker.internal}
+    volumes:
+      - /var/run
+      - /tmp
+    command: ["sleep", "300"]
+
+  worker:
+    image: alpine:latest
+    depends_on:
+      db:
+        condition: service_started
+    command: ["sleep", "300"]
+
+volumes:
+  db-data:
+    driver: local

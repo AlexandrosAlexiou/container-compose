@@ -328,3 +328,135 @@ func TestHostnameLabel(t *testing.T) {
 		t.Errorf("expected hostname label, got: %s", argsStr)
 	}
 }
+
+func TestAnonymousVolume(t *testing.T) {
+	service := types.ServiceConfig{
+		Image: "nginx",
+		Volumes: []types.ServiceVolumeConfig{
+			{Type: "volume", Target: "/var/run"},
+			{Type: "volume", Target: "/tmp"},
+		},
+	}
+
+	args := ContainerRunArgs("proj", service, "web", 1)
+	argsStr := strings.Join(args, " ")
+
+	// Anonymous volumes (no source) should become --tmpfs
+	if !strings.Contains(argsStr, "--tmpfs /var/run") {
+		t.Errorf("expected --tmpfs /var/run for anonymous volume, got: %s", argsStr)
+	}
+	if !strings.Contains(argsStr, "--tmpfs /tmp") {
+		t.Errorf("expected --tmpfs /tmp for anonymous volume, got: %s", argsStr)
+	}
+	// Should NOT produce -v :/var/run
+	if strings.Contains(argsStr, "-v :/var/run") {
+		t.Errorf("should not produce empty source bind mount, got: %s", argsStr)
+	}
+}
+
+func TestBindVolume(t *testing.T) {
+	service := types.ServiceConfig{
+		Image: "postgres",
+		Volumes: []types.ServiceVolumeConfig{
+			{Type: "bind", Source: "/host/init.sql", Target: "/docker-entrypoint-initdb.d/init.sql"},
+		},
+	}
+
+	args := ContainerRunArgs("proj", service, "db", 1)
+	argsStr := strings.Join(args, " ")
+
+	if !strings.Contains(argsStr, "-v /host/init.sql:/docker-entrypoint-initdb.d/init.sql") {
+		t.Errorf("expected bind mount, got: %s", argsStr)
+	}
+}
+
+func TestUserFlag(t *testing.T) {
+	service := types.ServiceConfig{
+		Image: "nginx",
+		User:  "1000:1000",
+	}
+
+	args := ContainerRunArgs("proj", service, "web", 1)
+	argsStr := strings.Join(args, " ")
+
+	if !strings.Contains(argsStr, "-u 1000:1000") {
+		t.Errorf("expected -u 1000:1000, got: %s", argsStr)
+	}
+}
+
+func TestReadOnly(t *testing.T) {
+	service := types.ServiceConfig{
+		Image:    "nginx",
+		ReadOnly: true,
+	}
+
+	args := ContainerRunArgs("proj", service, "web", 1)
+	argsStr := strings.Join(args, " ")
+
+	if !strings.Contains(argsStr, "--read-only") {
+		t.Errorf("expected --read-only, got: %s", argsStr)
+	}
+}
+
+func TestUlimits(t *testing.T) {
+	service := types.ServiceConfig{
+		Image: "elasticsearch",
+		Ulimits: map[string]*types.UlimitsConfig{
+			"nofile": {Soft: 65535, Hard: 65535},
+		},
+	}
+
+	args := ContainerRunArgs("proj", service, "es", 1)
+	argsStr := strings.Join(args, " ")
+
+	if !strings.Contains(argsStr, "--ulimit nofile=65535:65535") {
+		t.Errorf("expected --ulimit nofile=65535:65535, got: %s", argsStr)
+	}
+}
+
+func TestUlimitsSingle(t *testing.T) {
+	service := types.ServiceConfig{
+		Image: "app",
+		Ulimits: map[string]*types.UlimitsConfig{
+			"nproc": {Single: 1024},
+		},
+	}
+
+	args := ContainerRunArgs("proj", service, "app", 1)
+	argsStr := strings.Join(args, " ")
+
+	if !strings.Contains(argsStr, "--ulimit nproc=1024") {
+		t.Errorf("expected --ulimit nproc=1024, got: %s", argsStr)
+	}
+}
+
+func TestEnvFile(t *testing.T) {
+	service := types.ServiceConfig{
+		Image: "app",
+		EnvFiles: []types.EnvFile{
+			{Path: "/path/to/env.file"},
+		},
+	}
+
+	args := ContainerRunArgs("proj", service, "app", 1)
+	argsStr := strings.Join(args, " ")
+
+	if !strings.Contains(argsStr, "--env-file /path/to/env.file") {
+		t.Errorf("expected --env-file, got: %s", argsStr)
+	}
+}
+
+func TestCommand(t *testing.T) {
+	service := types.ServiceConfig{
+		Image:   "app",
+		Command: types.ShellCommand{"--config", "/etc/app.conf"},
+	}
+
+	args := ContainerRunArgs("proj", service, "app", 1)
+
+	// Command args should be appended after the image
+	argsStr := strings.Join(args, " ")
+	if !strings.Contains(argsStr, "app --config /etc/app.conf") {
+		t.Errorf("expected command args after image, got: %s", argsStr)
+	}
+}

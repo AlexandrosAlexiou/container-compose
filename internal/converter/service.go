@@ -137,6 +137,15 @@ func ContainerRunArgsWithProject(projectName string, service types.ServiceConfig
 		args = append(args, "--read-only")
 	}
 
+	// Ulimits
+	for name, ulimit := range service.Ulimits {
+		if ulimit.Single > 0 {
+			args = append(args, "--ulimit", fmt.Sprintf("%s=%d", name, ulimit.Single))
+		} else {
+			args = append(args, "--ulimit", fmt.Sprintf("%s=%d:%d", name, ulimit.Soft, ulimit.Hard))
+		}
+	}
+
 	// Platform
 	if service.Platform != "" {
 		args = append(args, "--platform", service.Platform)

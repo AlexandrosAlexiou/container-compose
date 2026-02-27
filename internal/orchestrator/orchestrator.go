@@ -168,6 +168,7 @@ func (o *Orchestrator) Down(ctx context.Context, project *types.Project, opts Do
 	// Reverse order for teardown — stop all replicas of each service
 	for i := len(order) - 1; i >= 0; i-- {
 		serviceName := order[i]
+		service := project.Services[serviceName]
 
 		o.logger.Infof("Stopping service %s", serviceName)
 
@@ -179,21 +180,26 @@ func (o *Orchestrator) Down(ctx context.Context, project *types.Project, opts Do
 				if err := o.driver.StopContainer(ctx, c.Name); err != nil {
 					o.logger.Warnf("Failed to stop %s: %v", c.Name, err)
 				}
-				if err := o.driver.DeleteContainer(ctx, c.Name); err != nil {
+				if err := o.driver.ForceDeleteContainer(ctx, c.Name); err != nil {
 					o.logger.Warnf("Failed to remove %s: %v", c.Name, err)
 				}
 				stopped = true
 			}
 		}
 
-		// Fallback: try the default name if listing didn't find anything
+		// Fallback: try container_name override, then default name
 		if !stopped {
 			containerName := converter.ContainerName(project.Name, serviceName, 1)
-			if err := o.driver.StopContainer(ctx, containerName); err != nil {
-				o.logger.Warnf("Failed to stop %s: %v", serviceName, err)
+			if service.ContainerName != "" {
+				containerName = service.ContainerName
 			}
-			if err := o.driver.DeleteContainer(ctx, containerName); err != nil {
-				o.logger.Warnf("Failed to remove %s: %v", serviceName, err)
+			_ = o.driver.StopContainer(ctx, containerName)
+			_ = o.driver.ForceDeleteContainer(ctx, containerName)
+			// Also try the generated name if we used container_name above
+			if service.ContainerName != "" {
+				genName := converter.ContainerName(project.Name, serviceName, 1)
+				_ = o.driver.StopContainer(ctx, genName)
+				_ = o.driver.ForceDeleteContainer(ctx, genName)
 			}
 		}
 	}
@@ -444,9 +450,31 @@ func (o *Orchestrator) setupServiceDiscovery(ctx context.Context, project *types
 	}
 	hostsContent := strings.Join(hostsLines, "\n")
 
+	// Build a set of read-only containers (need special handling for /etc/hosts)
+	readOnlyContainers := make(map[string]bool)
+	for serviceName, service := range project.Services {
+		if service.ReadOnly {
+			cn := converter.ContainerName(project.Name, serviceName, 1)
+			if service.ContainerName != "" {
+				cn = service.ContainerName
+			}
+			readOnlyContainers[cn] = true
+		}
+	}
+
 	// Inject into each container via shell (append to /etc/hosts)
 	o.logger.Infof("Setting up service discovery for %d containers", len(containerNames))
 	for _, containerName := range containerNames {
+		if readOnlyContainers[containerName] {
+			// Read-only rootfs: make /etc writable via tmpfs overlay
+			makeEtcWritable := "cp -a /etc /dev/shm/etc.bak && mount -t tmpfs tmpfs /etc && cp -a /dev/shm/etc.bak/. /etc/ && rm -rf /dev/shm/etc.bak"
+			_, err := o.driver.ExecSimple(ctx, containerName, []string{"sh", "-c", makeEtcWritable})
+			if err != nil {
+				o.logger.Warnf("Cannot make /etc writable in %s: %v", containerName, err)
+				continue
+			}
+		}
+
 		shellCmd := fmt.Sprintf("echo '%s' >> /etc/hosts", hostsContent)
 		_, err := o.driver.ExecSimple(ctx, containerName, []string{"sh", "-c", shellCmd})
 		if err != nil {
