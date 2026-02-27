@@ -48,6 +48,8 @@ sudo make install
 | `version` | Show version information |
 | `wait` | Block until a service container stops |
 | `attach` | Attach stdin/stdout/stderr to a running container |
+| `login` | Log in to a container registry |
+| `logout` | Log out from a container registry |
 
 ## Usage
 
@@ -165,17 +167,64 @@ container-compose -p myapp up -d
 | DNS service discovery | ✅ (via hostname + shared network) |
 | Port conflict detection | ✅ |
 
-### Not Applicable (VM Isolation)
+### How Features Map to Apple Container
 
-These features don't apply because Apple Container runs each container in a separate lightweight VM:
+Some Docker Compose features don't map directly to Apple Container CLI flags. `container-compose` uses workarounds to bridge the gap:
 
-| Feature | Reason |
-|---------|--------|
-| `privileged` / `cap_add` / `cap_drop` | VM provides full isolation |
-| `devices` | Hardware passthrough not supported |
+| Compose Feature | How It's Mapped |
+|---|---|
+| `hostname` | Injected as alias in `/etc/hosts` + `/etc/hostname` set after start |
+| `shm_size` | `/dev/shm` remounted with correct size via `mount -t tmpfs -o size=Xm` |
+| `host.docker.internal` | Gateway IP injected into `/etc/hosts` automatically |
+| `container_name` | Used as container ID + DNS alias in `/etc/hosts` |
+| `read_only` + service discovery | `/etc` overlaid with tmpfs to allow `/etc/hosts` writes |
+| Anonymous volumes (`- /var/run`) | Mapped to `--tmpfs` mounts |
+| `stop_signal` / `stop_grace_period` | Stored as labels (Apple Container uses fixed SIGTERM) |
+| `healthcheck` | Exec'd inside container after start (not native health support) |
+| Service discovery | `/etc/hosts` injection (not DNS-based like Docker) |
+| `links` | Stored as labels for metadata |
+
+### Limitations
+
+#### Not Possible (VM Architecture)
+
+Apple Container runs each container in a separate lightweight VM — not a shared-kernel namespace like Docker. This means 22 Docker Compose features are architecturally impossible:
+
+| Feature | Why |
+|---|---|
+| `privileged` / `cap_add` / `cap_drop` | Each VM has its own full kernel — no capabilities to add or drop |
+| `devices` / `gpus` | No host device/GPU passthrough to VMs |
 | `network_mode: host` | Each VM has its own network stack |
-| `pid` / `ipc` namespace sharing | VMs have separate namespaces |
-| `security_opt` / `sysctls` | VM-level security |
+| `pid` / `ipc` namespace sharing | VMs have separate kernels; can't share PID/IPC across them |
+| `volumes_from` | Separate VMs can't share mount namespaces |
+| `security_opt` / `sysctls` | VM isolation replaces seccomp/apparmor; sysctls are per-VM kernel |
+| `userns_mode` / `uts` | Each VM has its own user and UTS namespace |
+| `cgroup_parent` / `pids_limit` | VMs aren't in host cgroups |
+| `oom_kill_disable` / `storage_opt` | VM memory/storage managed differently |
+| `pause` / `unpause` | Apple Container doesn't support pause |
+| `runtime` | Single runtime (Apple VM) — no runc/kata/etc. |
+| `credential_spec` / `isolation` | Windows-only features |
+
+> **Impact:** Most real-world compose files don't use these features. If your compose file does use them, those lines will be silently ignored — the containers will still run, just without the specific kernel-level tuning.
+
+#### Not Yet Implemented
+
+These 4 features are possible but require significant work:
+
+| Feature | Description |
+|---|---|
+| `events` | Real-time event stream (`container-compose events`) — requires event streaming from Apple Container CLI |
+| `watch` / `develop` | File sync + auto-rebuild on source changes — requires file watcher and container restart logic |
+| Recreate changed only | On `up`, only recreate containers whose config changed — requires config diffing and state tracking |
+
+#### Known Quirks
+
+| Issue | Workaround |
+|---|---|
+| **XPC timeouts** | Apple Container occasionally times out stopping containers via XPC, leaving ghost references. `container-compose up` force-removes existing containers before starting to handle this. |
+| **Service discovery is /etc/hosts-based** | Unlike Docker's embedded DNS, we inject entries into `/etc/hosts`. This means: no wildcard DNS, no round-robin for scaled services, and entries are static (set at startup). |
+| **shm_size is applied after start** | The `/dev/shm` remount happens after the container starts. If a process checks `/dev/shm` size during very early init, it may see the default 64MB briefly. |
+| **Private registries** | Run `container-compose login <registry>` before using private images. Apple Container uses its own credential store, not Docker's `~/.docker/config.json`. |
 
 ## Example
 
@@ -257,7 +306,18 @@ This works because `container-compose`:
 2. Injects `/etc/hosts` entries into every container mapping service names to IPs
 3. Places all services without explicit networks on the project's default network
 
-This means `WORDPRESS_DB_HOST: db`, `DATABASE_URL: postgres://db:5432/myapp`, and similar patterns work out of the box — just like Docker Compose.
+The following DNS names are automatically resolvable from inside any container:
+
+| Name | Resolves To |
+|---|---|
+| `<service-name>` (e.g. `db`) | Container IP of that service |
+| `<container-name>` (e.g. `myproject-db-1`) | Same container IP |
+| `<container_name>` override | If `container_name:` is set in compose |
+| `<hostname>` override | If `hostname:` is set in compose |
+| `host.docker.internal` | Host machine IP (gateway) |
+| `gateway.docker.internal` | Same as above |
+
+This means `WORDPRESS_DB_HOST: db`, `DATABASE_URL: postgres://db:5432/myapp`, and `${DOCKER_GATEWAY_HOST:-host.docker.internal}` patterns all work out of the box — just like Docker Compose.
 
 ## Testing
 
@@ -274,20 +334,18 @@ make test-integration-short
 
 Integration test fixtures are in `testdata/fixtures/` and cover:
 - Single service, multi-service with depends_on
-- Environment variables, named volumes, custom networks
+- Environment variables, env_file, named/bind/anonymous volumes
 - Service discovery (hostname resolution between containers)
+- `host.docker.internal` and `gateway.docker.internal` resolution
+- `hostname` alias injection and `/etc/hostname` setting
+- `shm_size` remounting (verified with `df`)
+- `read_only` rootfs with writable tmpfs mounts
+- `container_name` overrides and DNS aliases
+- `user`, `ulimits`, `command`
+- `depends_on: condition: service_healthy` (exec-based healthchecks)
+- `depends_on: condition: service_started`
 - Full WordPress + MySQL stack (real-world compose file)
-
-## Architecture
-
-```
-container-compose (Go)
-  ├── compose-go library (parses docker-compose.yml)
-  ├── orchestrator (dependency ordering, lifecycle)
-  ├── converter (ServiceConfig → CLI args)
-  └── driver (executes `container` CLI commands)
-        └── container CLI (Apple's Swift binary)
-```
+- Comprehensive `TestFullFeatures` test validating 14 features together
 
 ## Debugging
 
