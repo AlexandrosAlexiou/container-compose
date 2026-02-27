@@ -119,6 +119,26 @@ container-compose -f my-compose.yml up -d
 container-compose -p myapp up -d
 ```
 
+### Private Registries
+
+`container-compose` automatically reads Docker's credential store (`~/.docker/config.json`). If you've already logged in with `docker login`, `az acr login`, or any Docker credential helper, those credentials are synced to Apple Container on `up`:
+
+```bash
+# Any of these work — no extra step needed
+az acr login --name myregistry
+# or
+docker login ghcr.io
+
+# container-compose picks up the credentials automatically
+container-compose up -d
+```
+
+You can also log in directly:
+
+```bash
+container-compose login myregistry.azurecr.io
+```
+
 ## Supported Compose Features
 
 ### Service Configuration
@@ -224,7 +244,7 @@ These 4 features are possible but require significant work:
 | **XPC timeouts** | Apple Container occasionally times out stopping containers via XPC, leaving ghost references. `container-compose up` force-removes existing containers before starting to handle this. |
 | **Service discovery is /etc/hosts-based** | Unlike Docker's embedded DNS, we inject entries into `/etc/hosts`. This means: no wildcard DNS, no round-robin for scaled services, and entries are static (set at startup). |
 | **shm_size is applied after start** | The `/dev/shm` remount happens after the container starts. If a process checks `/dev/shm` size during very early init, it may see the default 64MB briefly. |
-| **Private registries** | Run `container-compose login <registry>` before using private images. Apple Container uses its own credential store, not Docker's `~/.docker/config.json`. |
+| **Private registries** | Credentials from `docker login` or `az acr login` are automatically synced — no extra login step needed. You can also use `container-compose login <registry>` directly. |
 
 ## Example
 
