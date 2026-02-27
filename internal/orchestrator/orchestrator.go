@@ -337,6 +337,7 @@ func (o *Orchestrator) setupServiceDiscovery(ctx context.Context, project *types
 		serviceName   string
 		container     string
 		containerName string // explicit container_name from compose (may differ from container)
+		hostname      string // explicit hostname from compose
 	}
 
 	var entries []hostEntry
@@ -371,6 +372,7 @@ func (o *Orchestrator) setupServiceDiscovery(ctx context.Context, project *types
 				serviceName:   serviceName,
 				container:     converter.ContainerName(project.Name, serviceName, i),
 				containerName: service.ContainerName,
+				hostname:      service.Hostname,
 			})
 			containerNames = append(containerNames, containerName)
 		}
@@ -389,7 +391,7 @@ func (o *Orchestrator) setupServiceDiscovery(ctx context.Context, project *types
 			fmt.Sprintf("%s host.docker.internal gateway.docker.internal", gatewayIP))
 	}
 
-	// Add service name, container name, and container_name aliases
+	// Add service name, container name, container_name, and hostname aliases
 	for _, e := range entries {
 		names := e.serviceName
 		if e.container != e.serviceName {
@@ -398,6 +400,10 @@ func (o *Orchestrator) setupServiceDiscovery(ctx context.Context, project *types
 		// Add explicit container_name alias if different from both
 		if e.containerName != "" && e.containerName != e.serviceName && e.containerName != e.container {
 			names += " " + e.containerName
+		}
+		// Add hostname alias (Docker Compose hostname: field)
+		if e.hostname != "" && e.hostname != e.serviceName && e.hostname != e.container && e.hostname != e.containerName {
+			names += " " + e.hostname
 		}
 		hostsLines = append(hostsLines, fmt.Sprintf("%s %s", e.ip, names))
 	}
@@ -414,6 +420,19 @@ func (o *Orchestrator) setupServiceDiscovery(ctx context.Context, project *types
 				o.logger.Warnf("Cannot inject hosts into %s: %v", containerName, err)
 			}
 		}
+	}
+
+	// Set /etc/hostname for containers with explicit hostname (Docker compat)
+	for serviceName, service := range project.Services {
+		if service.Hostname == "" {
+			continue
+		}
+		containerName := converter.ContainerName(project.Name, serviceName, 1)
+		if service.ContainerName != "" {
+			containerName = service.ContainerName
+		}
+		shellCmd := fmt.Sprintf("echo '%s' > /etc/hostname && hostname '%s' 2>/dev/null || true", service.Hostname, service.Hostname)
+		_, _ = o.driver.ExecSimple(ctx, containerName, []string{"sh", "-c", shellCmd})
 	}
 
 	if gatewayIP != "" {

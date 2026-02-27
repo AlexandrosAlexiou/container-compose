@@ -56,6 +56,10 @@ func init() {
 
 	// Interactive
 	rootCmd.AddCommand(newAttachCmd())
+
+	// Registry auth
+	rootCmd.AddCommand(newLoginCmd())
+	rootCmd.AddCommand(newLogoutCmd())
 }
 
 func Execute() error {
