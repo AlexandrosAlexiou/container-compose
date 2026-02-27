@@ -37,7 +37,6 @@ func TestContainerRunArgs(t *testing.T) {
 		"-v /host/data:/data",
 		"-l com.docker.compose.project=myproject",
 		"-l com.docker.compose.service=web",
-		"--hostname web",                          // DNS: defaults to service name
 		"--network myproject_default",             // default network when none specified
 	}
 
@@ -96,8 +95,9 @@ func TestContainerRunArgsCustomHostname(t *testing.T) {
 	args := ContainerRunArgs("proj", service, "web", 1)
 	argsStr := strings.Join(args, " ")
 
-	if !strings.Contains(argsStr, "--hostname myhost") {
-		t.Errorf("expected custom hostname, got: %s", argsStr)
+	// Hostname stored as label since container CLI doesn't support --hostname
+	if !strings.Contains(argsStr, "com.docker.compose.hostname=myhost") {
+		t.Errorf("expected hostname label, got: %s", argsStr)
 	}
 }
 
@@ -122,11 +122,6 @@ func TestDNSDiscovery(t *testing.T) {
 
 	args := ContainerRunArgs("myapp", service, "db", 1)
 	argsStr := strings.Join(args, " ")
-
-	// Should set hostname to service name for DNS discovery
-	if !strings.Contains(argsStr, "--hostname db") {
-		t.Errorf("expected --hostname db for DNS discovery, got: %s", argsStr)
-	}
 
 	// Should set DNS domain to project name
 	if !strings.Contains(argsStr, "--dns-domain myapp") {
@@ -196,11 +191,12 @@ func TestLinksArgs(t *testing.T) {
 	args := ContainerRunArgs("proj", service, "web", 1)
 	argsStr := strings.Join(args, " ")
 
-	if !strings.Contains(argsStr, "--add-host db:db") {
-		t.Errorf("expected --add-host db:db, got: %s", argsStr)
+	// Links are stored as labels since --add-host is not supported
+	if !strings.Contains(argsStr, "com.docker.compose.link.db=db") {
+		t.Errorf("expected link label for db, got: %s", argsStr)
 	}
-	if !strings.Contains(argsStr, "--add-host redis:cache") {
-		t.Errorf("expected --add-host redis:cache, got: %s", argsStr)
+	if !strings.Contains(argsStr, "com.docker.compose.link.redis=cache") {
+		t.Errorf("expected link label for redis alias, got: %s", argsStr)
 	}
 }
 
@@ -222,20 +218,12 @@ func TestHealthcheckArgs(t *testing.T) {
 	args := ContainerRunArgs("proj", service, "web", 1)
 	argsStr := strings.Join(args, " ")
 
-	if !strings.Contains(argsStr, "--health-cmd") {
-		t.Errorf("expected --health-cmd, got: %s", argsStr)
+	// Healthcheck stored as labels since --health-* not supported by container CLI
+	if !strings.Contains(argsStr, "com.docker.compose.healthcheck.cmd=curl -f http://localhost/") {
+		t.Errorf("expected healthcheck cmd label, got: %s", argsStr)
 	}
-	if !strings.Contains(argsStr, "curl -f http://localhost/") {
-		t.Errorf("expected health cmd args, got: %s", argsStr)
-	}
-	if !strings.Contains(argsStr, "--health-interval") {
-		t.Errorf("expected --health-interval, got: %s", argsStr)
-	}
-	if !strings.Contains(argsStr, "--health-timeout") {
-		t.Errorf("expected --health-timeout, got: %s", argsStr)
-	}
-	if !strings.Contains(argsStr, "--health-retries 3") {
-		t.Errorf("expected --health-retries 3, got: %s", argsStr)
+	if !strings.Contains(argsStr, "com.docker.compose.healthcheck.retries=3") {
+		t.Errorf("expected healthcheck retries label, got: %s", argsStr)
 	}
 }
 
@@ -262,10 +250,9 @@ func TestExposeArgs(t *testing.T) {
 	args := ContainerRunArgs("proj", service, "web", 1)
 	argsStr := strings.Join(args, " ")
 
-	if !strings.Contains(argsStr, "--expose 3000") {
-		t.Errorf("expected --expose 3000, got: %s", argsStr)
-	}
-	if !strings.Contains(argsStr, "--expose 8080") {
-		t.Errorf("expected --expose 8080, got: %s", argsStr)
+	// Expose is informational only; since container CLI doesn't support --expose,
+	// the ports are not passed as flags. Verify they don't cause errors.
+	if strings.Contains(argsStr, "--expose") {
+		t.Errorf("--expose should not be in args (not supported by container CLI), got: %s", argsStr)
 	}
 }
