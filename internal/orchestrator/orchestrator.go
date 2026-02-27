@@ -188,15 +188,19 @@ func (o *Orchestrator) Down(ctx context.Context, project *types.Project, opts Do
 
 	// 2. Remove networks (including default)
 	defaultNet := converter.NetworkName(project.Name, "default")
+	deletedNets := make(map[string]bool)
 	for name := range project.Networks {
 		networkName := converter.NetworkName(project.Name, name)
 		if err := o.driver.DeleteNetwork(ctx, networkName); err != nil {
 			o.logger.Warnf("Failed to remove network %s: %v", networkName, err)
 		}
+		deletedNets[networkName] = true
 	}
-	// Always try to remove the default network
-	if err := o.driver.DeleteNetwork(ctx, defaultNet); err != nil {
-		o.logger.Warnf("Failed to remove network %s: %v", defaultNet, err)
+	// Always try to remove the default network (avoid double-delete)
+	if !deletedNets[defaultNet] {
+		if err := o.driver.DeleteNetwork(ctx, defaultNet); err != nil {
+			o.logger.Warnf("Failed to remove network %s: %v", defaultNet, err)
+		}
 	}
 
 	// Remove orphan containers (containers belonging to the project but not defined in the compose file)
