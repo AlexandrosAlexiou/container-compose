@@ -82,6 +82,11 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 		replicas := replicaCount(serviceName, service, opts.Scale)
 		restartInfo := formatRestartInfo(service.Restart)
 
+		// Warn about unsupported multi-network (Apple Container has no "network connect")
+		if len(service.Networks) > 1 {
+			o.logger.Warnf("Service %s has %d networks; only the first will be attached (Apple Container does not support post-create network connect)", serviceName, len(service.Networks))
+		}
+
 		for i := 1; i <= replicas; i++ {
 			suffix := ""
 			if replicas > 1 {
