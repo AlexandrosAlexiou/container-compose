@@ -54,6 +54,11 @@ func ContainerRunArgsWithProject(projectName string, service types.ServiceConfig
 
 	// Volumes / bind mounts
 	for _, vol := range service.Volumes {
+		// Anonymous volumes (no source) → tmpfs mount
+		if vol.Source == "" {
+			args = append(args, "--tmpfs", vol.Target)
+			continue
+		}
 		volStr := formatVolume(projectName, vol)
 		args = append(args, "-v", volStr)
 	}
