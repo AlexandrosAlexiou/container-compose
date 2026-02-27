@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -479,6 +480,17 @@ func (d *Driver) RunContainerInteractive(ctx context.Context, args []string) err
 	cmd.Stdout = d.logger.Stdout()
 	cmd.Stderr = d.logger.Stderr()
 	cmd.Stdin = nil
+
+	return cmd.Run()
+}
+
+// AttachContainer connects stdin/stdout/stderr to a running container.
+func (d *Driver) AttachContainer(ctx context.Context, name string) error {
+	d.logger.Debugf("Attaching to container: %s", name)
+	cmd := exec.CommandContext(ctx, containerBinary, "exec", "-it", name, "/bin/sh")
+	cmd.Stdout = d.logger.Stdout()
+	cmd.Stderr = d.logger.Stderr()
+	cmd.Stdin = os.Stdin
 
 	return cmd.Run()
 }

@@ -47,6 +47,7 @@ sudo make install
 | `config` | Validate and render compose file |
 | `version` | Show version information |
 | `wait` | Block until a service container stops |
+| `attach` | Attach stdin/stdout/stderr to a running container |
 
 ## Usage
 
@@ -153,6 +154,9 @@ container-compose -p myapp up -d
 | `logging` (driver + options) | ✅ |
 | `mac_address` | ✅ |
 | `shm_size` | ✅ |
+| `healthcheck` (test, interval, timeout, retries) | ✅ |
+| `links` (DNS aliases) | ✅ |
+| `expose` | ✅ |
 | `secrets` (file-based) | ✅ |
 | `configs` (file-based) | ✅ |
 | `profiles` | ✅ |

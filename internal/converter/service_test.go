@@ -186,3 +186,86 @@ func TestFormatVolumeReadOnly(t *testing.T) {
 		t.Errorf("expected /host:/container:ro, got %s", result)
 	}
 }
+
+func TestLinksArgs(t *testing.T) {
+	service := types.ServiceConfig{
+		Image: "myapp:latest",
+		Links: []string{"db", "cache:redis"},
+	}
+
+	args := ContainerRunArgs("proj", service, "web", 1)
+	argsStr := strings.Join(args, " ")
+
+	if !strings.Contains(argsStr, "--add-host db:db") {
+		t.Errorf("expected --add-host db:db, got: %s", argsStr)
+	}
+	if !strings.Contains(argsStr, "--add-host redis:cache") {
+		t.Errorf("expected --add-host redis:cache, got: %s", argsStr)
+	}
+}
+
+func TestHealthcheckArgs(t *testing.T) {
+	interval := types.Duration(10000000000) // 10s
+	timeout := types.Duration(5000000000)   // 5s
+	retries := uint64(3)
+
+	service := types.ServiceConfig{
+		Image: "myapp:latest",
+		HealthCheck: &types.HealthCheckConfig{
+			Test:     []string{"CMD", "curl", "-f", "http://localhost/"},
+			Interval: &interval,
+			Timeout:  &timeout,
+			Retries:  &retries,
+		},
+	}
+
+	args := ContainerRunArgs("proj", service, "web", 1)
+	argsStr := strings.Join(args, " ")
+
+	if !strings.Contains(argsStr, "--health-cmd") {
+		t.Errorf("expected --health-cmd, got: %s", argsStr)
+	}
+	if !strings.Contains(argsStr, "curl -f http://localhost/") {
+		t.Errorf("expected health cmd args, got: %s", argsStr)
+	}
+	if !strings.Contains(argsStr, "--health-interval") {
+		t.Errorf("expected --health-interval, got: %s", argsStr)
+	}
+	if !strings.Contains(argsStr, "--health-timeout") {
+		t.Errorf("expected --health-timeout, got: %s", argsStr)
+	}
+	if !strings.Contains(argsStr, "--health-retries 3") {
+		t.Errorf("expected --health-retries 3, got: %s", argsStr)
+	}
+}
+
+func TestContainerNameOverride(t *testing.T) {
+	service := types.ServiceConfig{
+		Image:         "nginx:latest",
+		ContainerName: "my-custom-name",
+	}
+
+	args := ContainerRunArgs("proj", service, "web", 1)
+
+	// The --name should be overridden
+	if args[2] != "my-custom-name" {
+		t.Errorf("expected container name my-custom-name, got %s", args[2])
+	}
+}
+
+func TestExposeArgs(t *testing.T) {
+	service := types.ServiceConfig{
+		Image:  "myapp:latest",
+		Expose: []string{"3000", "8080"},
+	}
+
+	args := ContainerRunArgs("proj", service, "web", 1)
+	argsStr := strings.Join(args, " ")
+
+	if !strings.Contains(argsStr, "--expose 3000") {
+		t.Errorf("expected --expose 3000, got: %s", argsStr)
+	}
+	if !strings.Contains(argsStr, "--expose 8080") {
+		t.Errorf("expected --expose 8080, got: %s", argsStr)
+	}
+}
