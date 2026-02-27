@@ -476,6 +476,31 @@ func (d *Driver) GetContainerIP(ctx context.Context, name string) (string, error
 	return ip, nil
 }
 
+// GetContainerGateway returns the IPv4 gateway of a container's network.
+// This is the host IP from the container's perspective.
+func (d *Driver) GetContainerGateway(ctx context.Context, name string) (string, error) {
+	info, err := d.InspectContainer(ctx, name)
+	if err != nil {
+		return "", err
+	}
+
+	networks, ok := info["networks"].([]interface{})
+	if !ok || len(networks) == 0 {
+		return "", fmt.Errorf("no networks found for container %s", name)
+	}
+
+	net, ok := networks[0].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("invalid network info for container %s", name)
+	}
+
+	gw, _ := net["ipv4Gateway"].(string)
+	if gw == "" {
+		return "", fmt.Errorf("no gateway for container %s", name)
+	}
+	return gw, nil
+}
+
 // ExecSimple runs a command in a container and returns stdout output.
 func (d *Driver) ExecSimple(ctx context.Context, containerName string, command []string) (string, error) {
 	args := []string{"exec", containerName}

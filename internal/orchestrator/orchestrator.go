@@ -17,6 +17,7 @@ type Orchestrator struct {
 	driver    *driver.Driver
 	logger    *output.Logger
 	cancelMon context.CancelFunc // cancels restart monitors
+	project   *types.Project     // current project (set during Up)
 }
 
 // UpOptions configures the up operation.
@@ -39,6 +40,8 @@ func New(d *driver.Driver, logger *output.Logger) *Orchestrator {
 
 // Up creates and starts all services in dependency order.
 func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOptions) error {
+	o.project = project
+
 	// 0. Validate port conflicts
 	if err := checkPortConflicts(project, opts.Scale); err != nil {
 		return err
@@ -272,6 +275,17 @@ func (o *Orchestrator) createVolumes(ctx context.Context, project *types.Project
 	return nil
 }
 
+// findService looks up a service by name in the current project.
+func (o *Orchestrator) findService(projectName, serviceName string) *types.ServiceConfig {
+	if o.project == nil {
+		return nil
+	}
+	if svc, ok := o.project.Services[serviceName]; ok {
+		return &svc
+	}
+	return nil
+}
+
 func (o *Orchestrator) buildImages(ctx context.Context, project *types.Project) error {
 	for name, service := range project.Services {
 		if service.Build == nil {
@@ -316,57 +330,85 @@ func (o *Orchestrator) buildImages(ctx context.Context, project *types.Project) 
 
 // setupServiceDiscovery injects /etc/hosts entries into all containers so that
 // services can resolve each other by service name (Docker Compose compatibility).
-// Apple Container doesn't support --hostname and its built-in DNS requires PF rules
-// that need sudo, so we use /etc/hosts injection as a reliable workaround.
+// Also adds host.docker.internal pointing to the network gateway (host IP).
 func (o *Orchestrator) setupServiceDiscovery(ctx context.Context, project *types.Project, scaleMap map[string]int) error {
 	type hostEntry struct {
-		ip          string
-		serviceName string
-		container   string
+		ip            string
+		serviceName   string
+		container     string
+		containerName string // explicit container_name from compose (may differ from container)
 	}
 
 	var entries []hostEntry
 	var containerNames []string
+	var gatewayIP string
 
 	// Collect IPs for all running containers
 	for serviceName, service := range project.Services {
 		replicas := replicaCount(serviceName, service, scaleMap)
 		for i := 1; i <= replicas; i++ {
+			// Determine the actual container name (respects container_name override)
 			containerName := converter.ContainerName(project.Name, serviceName, i)
+			if service.ContainerName != "" {
+				containerName = service.ContainerName
+			}
+
 			ip, err := o.driver.GetContainerIP(ctx, containerName)
 			if err != nil {
 				o.logger.Warnf("Cannot get IP for %s: %v", containerName, err)
 				continue
 			}
+
+			// Get gateway IP from the first container
+			if gatewayIP == "" {
+				if gw, err := o.driver.GetContainerGateway(ctx, containerName); err == nil {
+					gatewayIP = gw
+				}
+			}
+
 			entries = append(entries, hostEntry{
-				ip:          ip,
-				serviceName: serviceName,
-				container:   containerName,
+				ip:            ip,
+				serviceName:   serviceName,
+				container:     converter.ContainerName(project.Name, serviceName, i),
+				containerName: service.ContainerName,
 			})
 			containerNames = append(containerNames, containerName)
 		}
 	}
 
-	if len(entries) < 2 {
-		return nil // No point in service discovery with 0-1 containers
+	if len(entries) == 0 {
+		return nil
 	}
 
-	// Build hosts content: each entry maps service name AND container name to IP
+	// Build hosts content
 	var hostsLines []string
+
+	// Add host.docker.internal and gateway.docker.internal -> gateway IP
+	if gatewayIP != "" {
+		hostsLines = append(hostsLines,
+			fmt.Sprintf("%s host.docker.internal gateway.docker.internal", gatewayIP))
+	}
+
+	// Add service name, container name, and container_name aliases
 	for _, e := range entries {
-		// Map both the service name and the container name to the IP
-		hostsLines = append(hostsLines, fmt.Sprintf("%s %s %s", e.ip, e.serviceName, e.container))
+		names := e.serviceName
+		if e.container != e.serviceName {
+			names += " " + e.container
+		}
+		// Add explicit container_name alias if different from both
+		if e.containerName != "" && e.containerName != e.serviceName && e.containerName != e.container {
+			names += " " + e.containerName
+		}
+		hostsLines = append(hostsLines, fmt.Sprintf("%s %s", e.ip, names))
 	}
 	hostsContent := strings.Join(hostsLines, "\n")
 
 	// Inject into each container via shell (append to /etc/hosts)
 	o.logger.Infof("Setting up service discovery for %d containers", len(containerNames))
 	for _, containerName := range containerNames {
-		// Use sh -c with echo to append entries, handling the case where sh exists
 		shellCmd := fmt.Sprintf("echo '%s' >> /etc/hosts", hostsContent)
 		_, err := o.driver.ExecSimple(ctx, containerName, []string{"sh", "-c", shellCmd})
 		if err != nil {
-			// Try with /bin/sh explicitly
 			_, err = o.driver.ExecSimple(ctx, containerName, []string{"/bin/sh", "-c", shellCmd})
 			if err != nil {
 				o.logger.Warnf("Cannot inject hosts into %s: %v", containerName, err)
@@ -374,6 +416,10 @@ func (o *Orchestrator) setupServiceDiscovery(ctx context.Context, project *types
 		}
 	}
 
-	o.logger.Successf("Service discovery configured (%d services)", len(entries))
+	if gatewayIP != "" {
+		o.logger.Successf("Service discovery configured (%d services, host.docker.internal=%s)", len(entries), gatewayIP)
+	} else {
+		o.logger.Successf("Service discovery configured (%d services)", len(entries))
+	}
 	return nil
 }

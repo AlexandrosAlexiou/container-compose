@@ -8,19 +8,43 @@ import (
 	"strings"
 	"time"
 
+	"github.com/apple/container-compose/internal/converter"
+	"github.com/apple/container-compose/internal/driver"
 	"github.com/compose-spec/compose-go/v2/types"
 )
 
 // waitForHealthy polls a container's health status until healthy or timeout.
-func waitForHealthy(ctx context.Context, containerName string, timeout time.Duration) error {
+// If a healthcheck command is defined in the compose service, it will exec that
+// command inside the container. Otherwise, it just checks container status.
+func waitForHealthy(ctx context.Context, d *driver.Driver, containerName string, healthcheck *types.HealthCheckConfig, timeout time.Duration) error {
 	if timeout == 0 {
 		timeout = 60 * time.Second
 	}
 
+	interval := 2 * time.Second
+	if healthcheck != nil && healthcheck.Interval != nil {
+		interval = time.Duration(*healthcheck.Interval)
+		if interval < time.Second {
+			interval = 2 * time.Second
+		}
+	}
+	if healthcheck != nil && healthcheck.StartPeriod != nil {
+		startPeriod := time.Duration(*healthcheck.StartPeriod)
+		if startPeriod > 0 {
+			time.Sleep(startPeriod)
+		}
+	}
+
+	retries := 30
+	if healthcheck != nil && healthcheck.Retries != nil {
+		retries = int(*healthcheck.Retries)
+	}
+
 	deadline := time.After(timeout)
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	attempt := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -28,9 +52,14 @@ func waitForHealthy(ctx context.Context, containerName string, timeout time.Dura
 		case <-deadline:
 			return fmt.Errorf("timed out waiting for %s to become healthy", containerName)
 		case <-ticker.C:
-			healthy, err := checkHealth(ctx, containerName)
+			attempt++
+			if attempt > retries {
+				return fmt.Errorf("%s failed health check after %d retries", containerName, retries)
+			}
+
+			healthy, err := checkHealthExec(ctx, d, containerName, healthcheck)
 			if err != nil {
-				continue // container may not be ready yet
+				continue
 			}
 			if healthy {
 				return nil
@@ -39,7 +68,32 @@ func waitForHealthy(ctx context.Context, containerName string, timeout time.Dura
 	}
 }
 
-// checkHealth inspects a container and returns whether it reports healthy.
+// checkHealthExec runs the healthcheck command inside the container if defined,
+// otherwise falls back to checking container status.
+func checkHealthExec(ctx context.Context, d *driver.Driver, containerName string, healthcheck *types.HealthCheckConfig) (bool, error) {
+	// If healthcheck has a test command, exec it inside the container
+	if healthcheck != nil && len(healthcheck.Test) > 0 {
+		var cmd []string
+		if healthcheck.Test[0] == "CMD" {
+			cmd = healthcheck.Test[1:]
+		} else if healthcheck.Test[0] == "CMD-SHELL" {
+			cmd = []string{"sh", "-c", strings.Join(healthcheck.Test[1:], " ")}
+		} else {
+			// Bare command
+			cmd = healthcheck.Test
+		}
+
+		if len(cmd) > 0 {
+			_, err := d.ExecSimple(ctx, containerName, cmd)
+			return err == nil, nil
+		}
+	}
+
+	// Fallback: check container status is "running"
+	return checkHealth(ctx, containerName)
+}
+
+// checkHealth inspects a container and returns whether it reports running.
 func checkHealth(ctx context.Context, containerName string) (bool, error) {
 	cmd := exec.CommandContext(ctx, "container", "inspect", containerName)
 	out, err := cmd.Output()
@@ -47,15 +101,17 @@ func checkHealth(ctx context.Context, containerName string) (bool, error) {
 		return false, err
 	}
 
-	var result map[string]interface{}
-	if err := json.Unmarshal(out, &result); err != nil {
-		return false, err
-	}
-
-	// Check for health status in inspect output
-	status, ok := result["status"].(string)
-	if !ok {
-		return false, nil
+	// Handle array or single object response
+	var status string
+	var arr []map[string]interface{}
+	if err := json.Unmarshal(out, &arr); err == nil && len(arr) > 0 {
+		status, _ = arr[0]["status"].(string)
+	} else {
+		var result map[string]interface{}
+		if err := json.Unmarshal(out, &result); err != nil {
+			return false, err
+		}
+		status, _ = result["status"].(string)
 	}
 
 	return strings.EqualFold(status, "running"), nil
@@ -69,15 +125,24 @@ func shouldWaitForHealthy(dep types.ServiceDependency) bool {
 // waitForDependencies waits for all dependencies of a service to be ready.
 func (o *Orchestrator) waitForDependencies(ctx context.Context, projectName string, service types.ServiceConfig, serviceName string) error {
 	for depName, dep := range service.DependsOn {
-		containerName := fmt.Sprintf("%s-%s-1", projectName, depName)
+		// Respect container_name override for the dependency
+		depService := o.findService(projectName, depName)
+		containerName := converter.ContainerName(projectName, depName, 1)
+		if depService != nil && depService.ContainerName != "" {
+			containerName = depService.ContainerName
+		}
 
 		if shouldWaitForHealthy(dep) {
 			o.logger.Infof("Waiting for %s to be healthy...", depName)
-			timeout := 60 * time.Second
-			if dep.Condition != "" {
-				// Use a reasonable default; compose spec doesn't have timeout on depends_on
+			timeout := 120 * time.Second
+
+			// Get the healthcheck config from the dependency service
+			var healthcheck *types.HealthCheckConfig
+			if depService != nil {
+				healthcheck = depService.HealthCheck
 			}
-			if err := waitForHealthy(ctx, containerName, timeout); err != nil {
+
+			if err := waitForHealthy(ctx, o.driver, containerName, healthcheck, timeout); err != nil {
 				return fmt.Errorf("dependency %s: %w", depName, err)
 			}
 			o.logger.Successf("Dependency %s is healthy", depName)
