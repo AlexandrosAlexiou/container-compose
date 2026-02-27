@@ -8,6 +8,7 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -577,5 +578,85 @@ func TestFullFeatures(t *testing.T) {
 	}
 	if !strings.Contains(out, "ready") {
 		t.Errorf("expected 'ready' in /tmp/health, got: %s", out)
+	}
+}
+
+func TestDockerCredentialSync(t *testing.T) {
+	// This test verifies that the credential discovery pipeline works
+	// with the real Docker config on this machine.
+	// It does NOT start containers — it just tests the credential lookup flow.
+
+	// 1. Check that docker-credential-osxkeychain is available
+	if _, err := exec.LookPath("docker-credential-osxkeychain"); err != nil {
+		t.Skip("Skipping: docker-credential-osxkeychain not in PATH")
+	}
+
+	// 2. Check that ~/.docker/config.json exists and is parseable
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("Skipping: cannot determine home directory")
+	}
+	configPath := filepath.Join(home, ".docker", "config.json")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Skip("Skipping: no ~/.docker/config.json found")
+	}
+
+	// 3. Parse the config
+	type dockerConfig struct {
+		Auths      map[string]interface{} `json:"auths"`
+		CredsStore string                 `json:"credsStore"`
+	}
+	var config dockerConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("Failed to parse Docker config: %v", err)
+	}
+
+	if config.CredsStore == "" {
+		t.Skip("Skipping: no credsStore configured")
+	}
+	if len(config.Auths) == 0 {
+		t.Skip("Skipping: no registries in auths")
+	}
+
+	t.Logf("Docker config: credsStore=%s, %d registries", config.CredsStore, len(config.Auths))
+
+	// 4. Try to retrieve credentials for each registry
+	helperName := "docker-credential-" + config.CredsStore
+	retrieved := 0
+	for server := range config.Auths {
+		registry := strings.TrimPrefix(server, "https://")
+		registry = strings.TrimPrefix(registry, "http://")
+
+		cmd := exec.Command(helperName, "get")
+		cmd.Stdin = strings.NewReader(registry)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Logf("  %s: helper failed (may be expired): %v", registry, err)
+			continue
+		}
+
+		var cred struct {
+			Username string `json:"Username"`
+			Secret   string `json:"Secret"`
+		}
+		if err := json.Unmarshal(out, &cred); err != nil {
+			t.Errorf("  %s: invalid credential JSON: %v", registry, err)
+			continue
+		}
+
+		if cred.Secret == "" {
+			t.Errorf("  %s: empty secret", registry)
+			continue
+		}
+
+		t.Logf("  %s: credentials retrieved (user=%s, secret=%d chars)", registry, cred.Username, len(cred.Secret))
+		retrieved++
+	}
+
+	if retrieved == 0 {
+		t.Log("No credentials could be retrieved (tokens may be expired)")
+	} else {
+		t.Logf("Successfully retrieved %d/%d registry credentials", retrieved, len(config.Auths))
 	}
 }

@@ -33,6 +33,12 @@ func TestExtractRegistry(t *testing.T) {
 
 		// AWS ECR
 		{"123456789.dkr.ecr.us-east-1.amazonaws.com/myapp:latest", "123456789.dkr.ecr.us-east-1.amazonaws.com"},
+
+		// Deep paths
+		{"myregistry.azurecr.io/team/project/app:v1", "myregistry.azurecr.io"},
+
+		// Empty string
+		{"", ""},
 	}
 
 	for _, tt := range tests {
@@ -42,5 +48,29 @@ func TestExtractRegistry(t *testing.T) {
 				t.Errorf("extractRegistry(%q) = %q, want %q", tt.image, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestExtractRegistryDeduplication(t *testing.T) {
+	// Test that multiple images from the same registry yield the same result
+	images := []string{
+		"myregistry.azurecr.io/app1:latest",
+		"myregistry.azurecr.io/app2:v2",
+		"myregistry.azurecr.io/team/app3:latest",
+	}
+
+	registries := make(map[string]bool)
+	for _, img := range images {
+		r := extractRegistry(img)
+		if r != "" {
+			registries[r] = true
+		}
+	}
+
+	if len(registries) != 1 {
+		t.Errorf("expected 1 unique registry, got %d: %v", len(registries), registries)
+	}
+	if !registries["myregistry.azurecr.io"] {
+		t.Errorf("expected myregistry.azurecr.io, got %v", registries)
 	}
 }
