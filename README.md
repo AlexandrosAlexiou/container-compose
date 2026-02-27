@@ -121,7 +121,7 @@ container-compose -p myapp up -d
 
 ### Private Registries
 
-`container-compose` automatically reads Docker's credential store (`~/.docker/config.json`). If you've already logged in with `docker login`, `az acr login`, or any Docker credential helper, those credentials are synced to Apple Container on `up`:
+**With Docker installed:** `container-compose` automatically reads Docker's credential store (`~/.docker/config.json`). If you've already logged in with `docker login`, `az acr login`, or any Docker credential helper, those credentials are synced to Apple Container on `up`:
 
 ```bash
 # Any of these work — no extra step needed
@@ -133,11 +133,15 @@ docker login ghcr.io
 container-compose up -d
 ```
 
-You can also log in directly:
+**Without Docker:** Log in directly using Apple Container's registry store:
 
 ```bash
 container-compose login myregistry.azurecr.io
+# or with explicit credentials
+container-compose login -u myuser myregistry.azurecr.io
 ```
+
+If credentials are missing for a private registry, `container-compose` will warn you with the exact command to run.
 
 ## Supported Compose Features
 

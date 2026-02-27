@@ -329,13 +329,13 @@ func (o *Orchestrator) syncDockerCredentials(ctx context.Context, project *types
 		// Try to get credentials from Docker's credential store
 		cred, err := credentials.GetCredential(registry)
 		if err != nil {
-			o.logger.Debugf("No Docker credentials for %s: %v", registry, err)
+			o.logger.Warnf("No credentials for %s. If pulls fail, run: container-compose login %s", registry, registry)
 			continue
 		}
 
 		o.logger.Infof("Syncing Docker credentials for %s", registry)
 		if err := o.driver.RegistryLogin(ctx, registry, cred.Username, cred.Secret); err != nil {
-			o.logger.Warnf("Auto-login to %s failed: %v", registry, err)
+			o.logger.Warnf("Auto-login to %s failed: %v\nRun manually: container-compose login %s", registry, err, registry)
 		} else {
 			o.logger.Successf("Logged in to %s (from Docker credentials)", registry)
 		}
