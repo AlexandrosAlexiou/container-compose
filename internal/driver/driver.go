@@ -181,9 +181,11 @@ func (d *Driver) ListContainers(ctx context.Context, projectName string) ([]Cont
 		// Apple Container JSON: name is at configuration.id, status at top level
 		name := ""
 		status := ""
+		ports := ""
 
 		if config, ok := raw["configuration"].(map[string]interface{}); ok {
 			name, _ = config["id"].(string)
+			ports = formatPublishedPorts(config)
 		}
 		// Fallback: try "name" at top level
 		if name == "" {
@@ -196,6 +198,7 @@ func (d *Driver) ListContainers(ctx context.Context, projectName string) ([]Cont
 				Name:    name,
 				Service: extractServiceFromName(name, projectName),
 				Status:  status,
+				Ports:   ports,
 			})
 		}
 	}
@@ -314,6 +317,48 @@ func extractServiceFromName(containerName, projectName string) string {
 		return strings.Join(parts[:len(parts)-1], "-")
 	}
 	return trimmed
+}
+
+// formatPublishedPorts extracts port mappings from the configuration JSON.
+// Format: "0.0.0.0:8080->80/tcp"
+func formatPublishedPorts(config map[string]interface{}) string {
+	portsRaw, ok := config["publishedPorts"].([]interface{})
+	if !ok || len(portsRaw) == 0 {
+		return ""
+	}
+
+	var parts []string
+	for _, p := range portsRaw {
+		port, ok := p.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		hostAddr, _ := port["hostAddress"].(string)
+		if hostAddr == "" {
+			hostAddr = "0.0.0.0"
+		}
+		hostPort := intFromJSON(port["hostPort"])
+		containerPort := intFromJSON(port["containerPort"])
+		proto, _ := port["proto"].(string)
+		if proto == "" {
+			proto = "tcp"
+		}
+
+		if hostPort > 0 && containerPort > 0 {
+			parts = append(parts, fmt.Sprintf("%s:%d->%d/%s", hostAddr, hostPort, containerPort, proto))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+func intFromJSON(v interface{}) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	}
+	return 0
 }
 
 // KillContainer sends a signal to a container.
