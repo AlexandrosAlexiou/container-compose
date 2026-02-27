@@ -9,6 +9,12 @@ import (
 
 // ContainerRunArgs converts a compose ServiceConfig into arguments for `container run`.
 func ContainerRunArgs(projectName string, service types.ServiceConfig, serviceName string, replica int) []string {
+	return ContainerRunArgsWithProject(projectName, service, serviceName, replica, nil)
+}
+
+// ContainerRunArgsWithProject converts a compose ServiceConfig into arguments for `container run`,
+// with project-level secrets and configs resolution.
+func ContainerRunArgsWithProject(projectName string, service types.ServiceConfig, serviceName string, replica int, project *types.Project) []string {
 	containerName := ContainerName(projectName, serviceName, replica)
 
 	args := []string{"run", "--name", containerName, "-d"}
@@ -128,6 +134,110 @@ func ContainerRunArgs(projectName string, service types.ServiceConfig, serviceNa
 		hostname = serviceName
 	}
 	args = append(args, "--hostname", hostname)
+
+	// Container name override
+	if service.ContainerName != "" {
+		// Override the auto-generated name
+		args[2] = service.ContainerName
+	}
+
+	// TTY
+	if service.Tty {
+		args = append(args, "-t")
+	}
+
+	// Stdin open
+	if service.StdinOpen {
+		args = append(args, "-i")
+	}
+
+	// Stop signal
+	if service.StopSignal != "" {
+		args = append(args, "--stop-signal", service.StopSignal)
+	}
+
+	// Stop grace period
+	if service.StopGracePeriod != nil {
+		duration := service.StopGracePeriod.String()
+		args = append(args, "--stop-timeout", duration)
+	}
+
+	// Extra hosts
+	for host, ips := range service.ExtraHosts {
+		for _, ip := range ips {
+			args = append(args, "--add-host", host+":"+ip)
+		}
+	}
+
+	// Domainname
+	if service.DomainName != "" {
+		args = append(args, "--domainname", service.DomainName)
+	}
+
+	// MAC address
+	if service.MacAddress != "" {
+		args = append(args, "--mac-address", service.MacAddress)
+	}
+
+	// SHM size
+	if service.ShmSize > 0 {
+		args = append(args, "--shm-size", fmt.Sprintf("%d", service.ShmSize))
+	}
+
+	// Annotations
+	for k, v := range service.Annotations {
+		args = append(args, "--annotation", fmt.Sprintf("%s=%s", k, v))
+	}
+
+	// Deploy resource limits (cpu/memory)
+	if service.Deploy != nil && service.Deploy.Resources.Limits != nil {
+		res := service.Deploy.Resources.Limits
+		if res.NanoCPUs > 0 {
+			args = append(args, "-c", fmt.Sprintf("%.0f", float32(res.NanoCPUs)))
+		}
+		if res.MemoryBytes > 0 {
+			args = append(args, "-m", fmt.Sprintf("%d", res.MemoryBytes))
+		}
+	}
+
+	// Secrets: mount as read-only bind mounts at /run/secrets/<name>
+	for _, secret := range service.Secrets {
+		target := secret.Target
+		if target == "" {
+			target = "/run/secrets/" + secret.Source
+		}
+		if project != nil {
+			if secretDef, ok := project.Secrets[secret.Source]; ok && secretDef.File != "" {
+				args = append(args, "-v", secretDef.File+":"+target+":ro")
+			}
+		}
+	}
+
+	// Configs: mount as read-only bind mounts at /<name>
+	for _, config := range service.Configs {
+		target := config.Target
+		if target == "" {
+			target = "/" + config.Source
+		}
+		if project != nil {
+			if configDef, ok := project.Configs[config.Source]; ok && configDef.File != "" {
+				args = append(args, "-v", configDef.File+":"+target+":ro")
+			}
+		}
+	}
+
+	// Logging driver
+	if service.Logging != nil && service.Logging.Driver != "" {
+		args = append(args, "--log-driver", service.Logging.Driver)
+		for k, v := range service.Logging.Options {
+			args = append(args, "--log-opt", fmt.Sprintf("%s=%s", k, v))
+		}
+	}
+
+	// Pull policy (used as a hint)
+	if service.PullPolicy != "" {
+		args = append(args, "--pull", service.PullPolicy)
+	}
 
 	// Image (required, always last before command)
 	args = append(args, service.Image)
