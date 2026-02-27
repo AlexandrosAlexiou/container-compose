@@ -26,6 +26,33 @@ func init() {
 	rootCmd.AddCommand(newLogsCmd())
 	rootCmd.AddCommand(newBuildCmd())
 	rootCmd.AddCommand(newExecCmd())
+
+	// Lifecycle commands
+	rootCmd.AddCommand(newStartCmd())
+	rootCmd.AddCommand(newStopCmd())
+	rootCmd.AddCommand(newRestartCmd())
+	rootCmd.AddCommand(newCreateCmd())
+	rootCmd.AddCommand(newRmCmd())
+	rootCmd.AddCommand(newKillCmd())
+
+	// Image commands
+	rootCmd.AddCommand(newPullCmd())
+	rootCmd.AddCommand(newPushCmd())
+
+	// Run / Copy / Wait
+	rootCmd.AddCommand(newRunCmd())
+	rootCmd.AddCommand(newCpCmd())
+	rootCmd.AddCommand(newWaitCmd())
+
+	// Inspection commands
+	rootCmd.AddCommand(newTopCmd())
+	rootCmd.AddCommand(newPortCmd())
+	rootCmd.AddCommand(newImagesCmd())
+	rootCmd.AddCommand(newStatsCmd())
+
+	// Config / Version
+	rootCmd.AddCommand(newConfigCmd())
+	rootCmd.AddCommand(newVersionCmd())
 }
 
 func Execute() error {

@@ -288,3 +288,167 @@ func extractServiceFromName(containerName, projectName string) string {
 	}
 	return trimmed
 }
+
+// KillContainer sends a signal to a container.
+func (d *Driver) KillContainer(ctx context.Context, name string, signal string) error {
+	args := []string{"kill"}
+	if signal != "" {
+		args = append(args, "-s", signal)
+	}
+	args = append(args, name)
+
+	d.logger.Debugf("Kill: %s %s", containerBinary, strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, containerBinary, args...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("container kill %s failed: %w\n%s", name, err, stderr.String())
+	}
+	return nil
+}
+
+// PullImage pulls an image from a registry.
+func (d *Driver) PullImage(ctx context.Context, image string, platform string) error {
+	args := []string{"image", "pull"}
+	if platform != "" {
+		args = append(args, "--platform", platform)
+	}
+	args = append(args, image)
+
+	d.logger.Infof("Pulling %s", image)
+	cmd := exec.CommandContext(ctx, containerBinary, args...)
+	cmd.Stdout = d.logger.Stdout()
+	cmd.Stderr = d.logger.Stderr()
+
+	return cmd.Run()
+}
+
+// PushImage pushes an image to a registry.
+func (d *Driver) PushImage(ctx context.Context, image string) error {
+	d.logger.Infof("Pushing %s", image)
+	cmd := exec.CommandContext(ctx, containerBinary, "image", "push", image)
+	cmd.Stdout = d.logger.Stdout()
+	cmd.Stderr = d.logger.Stderr()
+
+	return cmd.Run()
+}
+
+// InspectContainer returns raw JSON inspect output for a container.
+func (d *Driver) InspectContainer(ctx context.Context, name string) (map[string]interface{}, error) {
+	cmd := exec.CommandContext(ctx, containerBinary, "inspect", name)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("container inspect %s failed: %w\n%s", name, err, stderr.String())
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(out, &result); err != nil {
+		return nil, fmt.Errorf("parsing inspect output: %w", err)
+	}
+	return result, nil
+}
+
+// StatsContainer shows resource usage stats for a container.
+func (d *Driver) StatsContainer(ctx context.Context, name string) error {
+	cmd := exec.CommandContext(ctx, containerBinary, "stats", name)
+	cmd.Stdout = d.logger.Stdout()
+	cmd.Stderr = d.logger.Stderr()
+
+	return cmd.Run()
+}
+
+// CopyToContainer copies files to a container.
+func (d *Driver) CopyToContainer(ctx context.Context, containerName, srcPath, dstPath string) error {
+	// Format: container cp SRC CONTAINER:DST
+	target := fmt.Sprintf("%s:%s", containerName, dstPath)
+	d.logger.Debugf("Copy: %s -> %s", srcPath, target)
+
+	cmd := exec.CommandContext(ctx, containerBinary, "cp", srcPath, target)
+	cmd.Stdout = d.logger.Stdout()
+	cmd.Stderr = d.logger.Stderr()
+
+	return cmd.Run()
+}
+
+// CopyFromContainer copies files from a container.
+func (d *Driver) CopyFromContainer(ctx context.Context, containerName, srcPath, dstPath string) error {
+	source := fmt.Sprintf("%s:%s", containerName, srcPath)
+	d.logger.Debugf("Copy: %s -> %s", source, dstPath)
+
+	cmd := exec.CommandContext(ctx, containerBinary, "cp", source, dstPath)
+	cmd.Stdout = d.logger.Stdout()
+	cmd.Stderr = d.logger.Stderr()
+
+	return cmd.Run()
+}
+
+// TopContainer shows running processes in a container.
+func (d *Driver) TopContainer(ctx context.Context, name string) error {
+	cmd := exec.CommandContext(ctx, containerBinary, "exec", name, "ps", "aux")
+	cmd.Stdout = d.logger.Stdout()
+	cmd.Stderr = d.logger.Stderr()
+
+	return cmd.Run()
+}
+
+// ImageList lists images matching a filter.
+func (d *Driver) ImageList(ctx context.Context) ([]map[string]interface{}, error) {
+	cmd := exec.CommandContext(ctx, containerBinary, "image", "list", "--format", "json")
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("image list failed: %w\n%s", err, stderr.String())
+	}
+
+	if len(strings.TrimSpace(string(out))) == 0 {
+		return nil, nil
+	}
+
+	var images []map[string]interface{}
+	if err := json.Unmarshal(out, &images); err != nil {
+		// Try line-by-line
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			var img map[string]interface{}
+			if err := json.Unmarshal([]byte(line), &img); err != nil {
+				continue
+			}
+			images = append(images, img)
+		}
+	}
+	return images, nil
+}
+
+// StartContainer starts a stopped container.
+func (d *Driver) StartContainer(ctx context.Context, name string) error {
+	d.logger.Debugf("Starting container: %s", name)
+	cmd := exec.CommandContext(ctx, containerBinary, "start", name)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("container start %s failed: %w\n%s", name, err, stderr.String())
+	}
+	return nil
+}
+
+// RunContainer executes `container run` with the given arguments and
+// optionally connects stdin/stdout for interactive use.
+func (d *Driver) RunContainerInteractive(ctx context.Context, args []string) error {
+	d.logger.Debugf("Running (interactive): %s %s", containerBinary, strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, containerBinary, args...)
+	cmd.Stdout = d.logger.Stdout()
+	cmd.Stderr = d.logger.Stderr()
+	cmd.Stdin = nil
+
+	return cmd.Run()
+}
