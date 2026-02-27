@@ -214,6 +214,6 @@ func newRmCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVarP(&force, "force", "f", false, "Force stop before removing")
+	cmd.Flags().BoolVar(&force, "force", false, "Force stop before removing")
 	return cmd
 }

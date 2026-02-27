@@ -14,6 +14,9 @@ func ContainerRunArgs(projectName string, service types.ServiceConfig, serviceNa
 
 // ContainerRunArgsWithProject converts a compose ServiceConfig into arguments for `container run`,
 // with project-level secrets and configs resolution.
+//
+// Only flags actually supported by Apple Container CLI are emitted.
+// Unsupported compose fields are stored as labels for metadata or silently skipped.
 func ContainerRunArgsWithProject(projectName string, service types.ServiceConfig, serviceName string, replica int, project *types.Project) []string {
 	containerName := ContainerName(projectName, serviceName, replica)
 
@@ -49,11 +52,6 @@ func ContainerRunArgsWithProject(projectName string, service types.ServiceConfig
 		args = append(args, "-p", portStr)
 	}
 
-	// Expose (document internal ports, no host binding)
-	for _, expose := range service.Expose {
-		args = append(args, "--expose", expose)
-	}
-
 	// Volumes / bind mounts
 	for _, vol := range service.Volumes {
 		volStr := formatVolume(projectName, vol)
@@ -65,18 +63,21 @@ func ContainerRunArgsWithProject(projectName string, service types.ServiceConfig
 		args = append(args, "--tmpfs", tmpfs)
 	}
 
-	// Networks: only one can be attached at run time; extras need post-create connect
-	// We store the full list so the driver can handle multi-network attachment.
+	// Networks: only one can be attached at run time
+	// MAC address is passed via the --network flag format: name,mac=XX:XX:XX:XX:XX:XX
+	networkArg := ""
 	if len(service.Networks) > 0 {
-		// Pick the first network for `run --network`
 		for network := range service.Networks {
-			args = append(args, "--network", NetworkName(projectName, network))
+			networkArg = NetworkName(projectName, network)
 			break
 		}
 	} else {
-		// Services without explicit networks join the project default network
-		args = append(args, "--network", NetworkName(projectName, "default"))
+		networkArg = NetworkName(projectName, "default")
 	}
+	if service.MacAddress != "" {
+		networkArg += ",mac=" + service.MacAddress
+	}
+	args = append(args, "--network", networkArg)
 
 	// Working directory
 	if service.WorkingDir != "" {
@@ -86,11 +87,6 @@ func ContainerRunArgsWithProject(projectName string, service types.ServiceConfig
 	// User
 	if service.User != "" {
 		args = append(args, "-u", service.User)
-	}
-
-	// Additional groups
-	for _, group := range service.GroupAdd {
-		args = append(args, "--group-add", group)
 	}
 
 	// Entrypoint: only the executable; extra args become part of the command
@@ -113,11 +109,9 @@ func ContainerRunArgsWithProject(projectName string, service types.ServiceConfig
 		args = append(args, "--dns", dns)
 	}
 
-	// DNS search domain: add project name so services can resolve by short name
-	if len(service.DNSSearch) > 0 {
-		for _, search := range service.DNSSearch {
-			args = append(args, "--dns-search", search)
-		}
+	// DNS search domains
+	for _, search := range service.DNSSearch {
+		args = append(args, "--dns-search", search)
 	}
 
 	// DNS options
@@ -143,16 +137,8 @@ func ContainerRunArgsWithProject(projectName string, service types.ServiceConfig
 		args = append(args, "--platform", service.Platform)
 	}
 
-	// Hostname: default to service name for DNS discovery between services
-	hostname := service.Hostname
-	if hostname == "" {
-		hostname = serviceName
-	}
-	args = append(args, "--hostname", hostname)
-
 	// Container name override
 	if service.ContainerName != "" {
-		// Override the auto-generated name
 		args[2] = service.ContainerName
 	}
 
@@ -166,51 +152,13 @@ func ContainerRunArgsWithProject(projectName string, service types.ServiceConfig
 		args = append(args, "-i")
 	}
 
-	// Stop signal
-	if service.StopSignal != "" {
-		args = append(args, "--stop-signal", service.StopSignal)
-	}
-
-	// Stop grace period
-	if service.StopGracePeriod != nil {
-		duration := service.StopGracePeriod.String()
-		args = append(args, "--stop-timeout", duration)
-	}
-
-	// Extra hosts
-	for host, ips := range service.ExtraHosts {
-		for _, ip := range ips {
-			args = append(args, "--add-host", host+":"+ip)
-		}
-	}
-
-	// Domainname
-	if service.DomainName != "" {
-		args = append(args, "--domainname", service.DomainName)
-	}
-
-	// MAC address
-	if service.MacAddress != "" {
-		args = append(args, "--mac-address", service.MacAddress)
-	}
-
-	// SHM size
-	if service.ShmSize > 0 {
-		args = append(args, "--shm-size", fmt.Sprintf("%d", service.ShmSize))
-	}
-
-	// Annotations
-	for k, v := range service.Annotations {
-		args = append(args, "--annotation", fmt.Sprintf("%s=%s", k, v))
-	}
-
-	// Deploy resource limits (cpu/memory)
+	// Deploy resource limits (cpu/memory) — only if not already set by top-level cpus/mem_limit
 	if service.Deploy != nil && service.Deploy.Resources.Limits != nil {
 		res := service.Deploy.Resources.Limits
-		if res.NanoCPUs > 0 {
+		if res.NanoCPUs > 0 && service.CPUS == 0 {
 			args = append(args, "-c", fmt.Sprintf("%.0f", float32(res.NanoCPUs)))
 		}
-		if res.MemoryBytes > 0 {
+		if res.MemoryBytes > 0 && service.MemLimit == 0 {
 			args = append(args, "-m", fmt.Sprintf("%d", res.MemoryBytes))
 		}
 	}
@@ -241,48 +189,43 @@ func ContainerRunArgsWithProject(projectName string, service types.ServiceConfig
 		}
 	}
 
-	// Logging driver
+	// --- Fields not natively supported by Apple Container CLI ---
+	// Store as labels for metadata so they can be inspected later.
+	// The orchestrator uses these for its own logic (health polling, restart, etc.)
+
+	if service.Hostname != "" {
+		args = appendLabel(args, "com.docker.compose.hostname", service.Hostname)
+	}
+	if service.StopSignal != "" {
+		args = appendLabel(args, "com.docker.compose.stop-signal", service.StopSignal)
+	}
+	if service.StopGracePeriod != nil {
+		args = appendLabel(args, "com.docker.compose.stop-grace-period", service.StopGracePeriod.String())
+	}
+	if service.DomainName != "" {
+		args = appendLabel(args, "com.docker.compose.domainname", service.DomainName)
+	}
+	if service.ShmSize > 0 {
+		args = appendLabel(args, "com.docker.compose.shm-size", fmt.Sprintf("%d", service.ShmSize))
+	}
+	for k, v := range service.Annotations {
+		args = appendLabel(args, "com.docker.compose.annotation."+k, v)
+	}
 	if service.Logging != nil && service.Logging.Driver != "" {
-		args = append(args, "--log-driver", service.Logging.Driver)
-		for k, v := range service.Logging.Options {
-			args = append(args, "--log-opt", fmt.Sprintf("%s=%s", k, v))
-		}
+		args = appendLabel(args, "com.docker.compose.log-driver", service.Logging.Driver)
 	}
-
-	// Pull policy (used as a hint)
 	if service.PullPolicy != "" {
-		args = append(args, "--pull", service.PullPolicy)
+		args = appendLabel(args, "com.docker.compose.pull-policy", service.PullPolicy)
 	}
 
-	// Healthcheck: pass definition as container flags if available
-	if service.HealthCheck != nil && !service.HealthCheck.Disable {
-		if len(service.HealthCheck.Test) > 0 {
-			// Test can be ["CMD", "arg1", ...] or ["CMD-SHELL", "cmd"]
-			// Pass the full test as a healthcheck-cmd
-			test := service.HealthCheck.Test
-			if len(test) > 1 && (test[0] == "CMD" || test[0] == "CMD-SHELL") {
-				args = append(args, "--health-cmd", strings.Join(test[1:], " "))
-			} else {
-				args = append(args, "--health-cmd", strings.Join(test, " "))
-			}
-		}
-		if service.HealthCheck.Interval != nil {
-			args = append(args, "--health-interval", service.HealthCheck.Interval.String())
-		}
-		if service.HealthCheck.Timeout != nil {
-			args = append(args, "--health-timeout", service.HealthCheck.Timeout.String())
-		}
-		if service.HealthCheck.Retries != nil {
-			args = append(args, "--health-retries", fmt.Sprintf("%d", *service.HealthCheck.Retries))
-		}
-		if service.HealthCheck.StartPeriod != nil {
-			args = append(args, "--health-start-period", service.HealthCheck.StartPeriod.String())
+	// Extra hosts: stored as env vars for /etc/hosts workaround
+	for host, ips := range service.ExtraHosts {
+		for _, ip := range ips {
+			args = appendLabel(args, "com.docker.compose.extra-host."+host, ip)
 		}
 	}
 
-	// Links: legacy service linking via DNS aliases.
-	// Format: "service" or "service:alias". We add --add-host entries so the
-	// alias resolves to the linked service's container hostname.
+	// Links: stored as labels; DNS handled by shared network + dns-domain
 	for _, link := range service.Links {
 		parts := strings.SplitN(link, ":", 2)
 		linkedService := parts[0]
@@ -290,9 +233,25 @@ func ContainerRunArgsWithProject(projectName string, service types.ServiceConfig
 		if len(parts) == 2 {
 			alias = parts[1]
 		}
-		// The linked service's hostname equals its service name (set via --hostname).
-		// We add an alias pointing to the linked service name so DNS resolves it.
-		args = append(args, "--add-host", alias+":"+linkedService)
+		args = appendLabel(args, "com.docker.compose.link."+alias, linkedService)
+	}
+
+	// Healthcheck: stored as labels; orchestrator uses compose config directly for polling
+	if service.HealthCheck != nil && !service.HealthCheck.Disable {
+		if len(service.HealthCheck.Test) > 0 {
+			test := service.HealthCheck.Test
+			if len(test) > 1 && (test[0] == "CMD" || test[0] == "CMD-SHELL") {
+				args = appendLabel(args, "com.docker.compose.healthcheck.cmd", strings.Join(test[1:], " "))
+			} else {
+				args = appendLabel(args, "com.docker.compose.healthcheck.cmd", strings.Join(test, " "))
+			}
+		}
+		if service.HealthCheck.Interval != nil {
+			args = appendLabel(args, "com.docker.compose.healthcheck.interval", service.HealthCheck.Interval.String())
+		}
+		if service.HealthCheck.Retries != nil {
+			args = appendLabel(args, "com.docker.compose.healthcheck.retries", fmt.Sprintf("%d", *service.HealthCheck.Retries))
+		}
 	}
 
 	// Image (required, always last before command)

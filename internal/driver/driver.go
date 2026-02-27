@@ -173,33 +173,29 @@ func (d *Driver) ListContainers(ctx context.Context, projectName string) ([]Cont
 
 	var rawContainers []map[string]interface{}
 	if err := json.Unmarshal(out, &rawContainers); err != nil {
-		// Try line-by-line JSON
-		var containers []ContainerInfo
-		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-			var raw map[string]interface{}
-			if err := json.Unmarshal([]byte(line), &raw); err != nil {
-				continue
-			}
-			name, _ := raw["name"].(string)
-			if strings.HasPrefix(name, projectName+"-") {
-				containers = append(containers, ContainerInfo{
-					Name:    name,
-					Service: extractServiceFromName(name, projectName),
-					Status:  fmt.Sprintf("%v", raw["status"]),
-				})
-			}
-		}
-		return containers, nil
+		return nil, fmt.Errorf("parsing container list: %w", err)
 	}
 
 	var containers []ContainerInfo
 	for _, raw := range rawContainers {
-		name, _ := raw["name"].(string)
-		if strings.HasPrefix(name, projectName+"-") {
+		// Apple Container JSON: name is at configuration.id, status at top level
+		name := ""
+		status := ""
+
+		if config, ok := raw["configuration"].(map[string]interface{}); ok {
+			name, _ = config["id"].(string)
+		}
+		// Fallback: try "name" at top level
+		if name == "" {
+			name, _ = raw["name"].(string)
+		}
+		status, _ = raw["status"].(string)
+
+		if name != "" && strings.HasPrefix(name, projectName+"-") {
 			containers = append(containers, ContainerInfo{
 				Name:    name,
 				Service: extractServiceFromName(name, projectName),
-				Status:  fmt.Sprintf("%v", raw["status"]),
+				Status:  status,
 			})
 		}
 	}

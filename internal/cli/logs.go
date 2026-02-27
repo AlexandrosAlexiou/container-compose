@@ -52,7 +52,7 @@ func newLogsCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "Follow log output")
+	cmd.Flags().BoolVar(&follow, "follow", false, "Follow log output")
 	cmd.Flags().StringVar(&tail, "tail", "all", "Number of lines to show from the end of the logs")
 
 	return cmd
