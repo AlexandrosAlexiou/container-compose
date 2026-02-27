@@ -125,47 +125,47 @@ container-compose -p myapp up -d
 
 | Feature | Status |
 |---------|--------|
-| `image` | ✅ |
-| `build` (context, dockerfile, args, target, cache_from, no_cache) | ✅ |
-| `ports` | ✅ |
-| `volumes` (bind + named) | ✅ |
-| `environment` | ✅ |
-| `env_file` | ✅ |
-| `networks` | ✅ |
-| `command` | ✅ |
-| `entrypoint` | ✅ |
-| `working_dir` | ✅ |
-| `user` | ✅ |
-| `container_name` | ✅ |
-| `depends_on` (ordering) | ✅ |
-| `depends_on` (service_healthy) | ✅ |
-| `cpus` / `mem_limit` | ✅ |
-| `deploy.replicas` | ✅ |
-| `deploy.resources` (limits) | ✅ |
-| `dns` / `dns_search` | ✅ |
-| `extra_hosts` | ✅ |
-| `hostname` / `domainname` | ✅ |
-| `init` | ✅ |
-| `read_only` | ✅ |
-| `tmpfs` | ✅ |
-| `tty` / `stdin_open` | ✅ |
-| `stop_signal` / `stop_grace_period` | ✅ |
-| `labels` / `annotations` | ✅ |
-| `platform` | ✅ |
-| `pull_policy` | ✅ |
-| `logging` (driver + options) | ✅ |
-| `mac_address` | ✅ |
-| `shm_size` | ✅ |
-| `healthcheck` (test, interval, timeout, retries) | ✅ |
-| `links` (DNS aliases) | ✅ |
-| `expose` | ✅ |
-| `secrets` (file-based) | ✅ |
-| `configs` (file-based) | ✅ |
-| `profiles` | ✅ |
-| `extends` / `includes` | ✅ (via compose-go) |
-| `restart` policies | ✅ |
-| DNS service discovery | ✅ (via hostname + shared network) |
-| Port conflict detection | ✅ |
+| `image` | ✓ |
+| `build` (context, dockerfile, args, target, cache_from, no_cache) | ✓ |
+| `ports` | ✓ |
+| `volumes` (bind + named) | ✓ |
+| `environment` | ✓ |
+| `env_file` | ✓ |
+| `networks` | ✓ |
+| `command` | ✓ |
+| `entrypoint` | ✓ |
+| `working_dir` | ✓ |
+| `user` | ✓ |
+| `container_name` | ✓ |
+| `depends_on` (ordering) | ✓ |
+| `depends_on` (service_healthy) | ✓ |
+| `cpus` / `mem_limit` | ✓ |
+| `deploy.replicas` | ✓ |
+| `deploy.resources` (limits) | ✓ |
+| `dns` / `dns_search` | ✓ |
+| `extra_hosts` | ✓ |
+| `hostname` / `domainname` | ✓ |
+| `init` | ✓ |
+| `read_only` | ✓ |
+| `tmpfs` | ✓ |
+| `tty` / `stdin_open` | ✓ |
+| `stop_signal` / `stop_grace_period` | ✓ |
+| `labels` / `annotations` | ✓ |
+| `platform` | ✓ |
+| `pull_policy` | ✓ |
+| `logging` (driver + options) | ✓ |
+| `mac_address` | ✓ |
+| `shm_size` | ✓ |
+| `healthcheck` (test, interval, timeout, retries) | ✓ |
+| `links` (DNS aliases) | ✓ |
+| `expose` | ✓ |
+| `secrets` (file-based) | ✓ |
+| `configs` (file-based) | ✓ |
+| `profiles` | ✓ |
+| `extends` / `includes` | ✓ (via compose-go) |
+| `restart` policies | ✓ |
+| DNS service discovery | ✓ (via hostname + shared network) |
+| Port conflict detection | ✓ |
 
 ### How Features Map to Apple Container
 
@@ -354,6 +354,108 @@ Set `COMPOSE_DEBUG=1` to see the `container` CLI commands being executed:
 ```bash
 COMPOSE_DEBUG=1 container-compose up
 ```
+
+## Apple Container Extensions (`x-apple-container`)
+
+Apple Container has unique capabilities that Docker doesn't offer. Standard compose files work unchanged, but you can opt in to Apple-specific features using the `x-apple-container` extension field. Docker Compose and other tools will silently ignore these fields — your compose file stays portable.
+
+### Available Extensions
+
+```yaml
+services:
+  my-service:
+    image: myapp:latest
+    x-apple-container:
+      rosetta: true
+      ssh: true
+      virtualization: true
+      no-dns: true
+      init-image: "my-init:latest"
+      publish-socket:
+        - "/run/app.sock:/var/run/app.sock"
+```
+
+| Extension | Apple Container Flag | Description |
+|---|---|---|
+| `rosetta: true` | `--rosetta` | Enable Rosetta translation for running x86_64 Linux binaries on Apple Silicon. Use this when your image is amd64-only and you don't want to rebuild for arm64. |
+| `ssh: true` | `--ssh` | Forward the host's SSH agent socket into the container. Enables `git clone` over SSH, private dependency installation, and key-based auth inside the container without copying keys. |
+| `virtualization: true` | `--virtualization` | Expose virtualization capabilities to the container. Enables running nested VMs inside the container (requires host and guest support). |
+| `no-dns: true` | `--no-dns` | Do not configure DNS in the container. Useful for containers that manage their own `/etc/resolv.conf`. |
+| `init-image: "<image>"` | `--init-image <image>` | Use a custom init image instead of Apple Container's default. The init process runs as PID 1 and reaps zombie processes. |
+| `publish-socket` | `--publish-socket` | Publish Unix domain sockets from the container to the host. Format: `container_path:host_path`. Unlike TCP port forwarding, this uses Unix sockets for lower latency IPC. |
+
+### Use Cases
+
+#### Cross-Architecture Development
+
+Run x86_64 Linux images on Apple Silicon without rebuilding:
+
+```yaml
+services:
+  legacy-api:
+    image: mycompany/legacy-api:latest  # amd64 only
+    platform: linux/amd64
+    x-apple-container:
+      rosetta: true  # Rosetta translates x86_64 → arm64
+    ports:
+      - "8080:8080"
+```
+
+#### Git Operations Inside Containers
+
+Forward your SSH agent for private repo access during builds or at runtime:
+
+```yaml
+services:
+  builder:
+    image: node:20
+    x-apple-container:
+      ssh: true  # SSH agent forwarded
+    command: ["sh", "-c", "git clone git@github.com:myorg/private-repo.git && npm install"]
+    volumes:
+      - .:/workspace
+```
+
+#### CI/CD with Nested Virtualization
+
+Run VMs inside containers for testing infrastructure tools:
+
+```yaml
+services:
+  test-runner:
+    image: ubuntu:24.04
+    x-apple-container:
+      virtualization: true  # Nested VM support
+    command: ["sh", "-c", "qemu-system-aarch64 ..."]
+```
+
+#### Unix Socket Communication
+
+Low-latency IPC between host and container using Unix sockets:
+
+```yaml
+services:
+  database:
+    image: postgres:16
+    x-apple-container:
+      publish-socket:
+        - "/var/run/postgresql/.s.PGSQL.5432:/tmp/pg.sock"
+    environment:
+      POSTGRES_PASSWORD: secret
+```
+
+### Portability
+
+These extensions are designed to be safely ignored:
+
+| Tool | Behavior |
+|---|---|
+| `container-compose` | ✓ Extensions applied |
+| `docker compose` | ✓ `x-` fields silently ignored |
+| `podman-compose` | ✓ `x-` fields silently ignored |
+| Any compose-spec tool | ✓ `x-` fields are part of the spec |
+
+This means you can use one compose file for both Docker and Apple Container. Developers on Apple Silicon get the extra features; everyone else gets standard Docker behavior.
 
 ## License
 
