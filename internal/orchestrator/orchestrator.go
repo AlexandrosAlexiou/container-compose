@@ -94,7 +94,7 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 			}
 			o.logger.Infof("Starting service %s%s%s", serviceName, suffix, restartInfo)
 
-			args := converter.ContainerRunArgs(project.Name, service, serviceName, i)
+			args := converter.ContainerRunArgsWithProject(project.Name, service, serviceName, i, project)
 			if err := o.driver.RunContainer(ctx, args); err != nil {
 				monCancel()
 				return fmt.Errorf("starting service %s replica %d: %w", serviceName, i, err)
@@ -239,8 +239,26 @@ func (o *Orchestrator) buildImages(ctx context.Context, project *types.Project) 
 			contextPath = "."
 		}
 
-		dockerfile := service.Build.Dockerfile
-		if err := o.driver.BuildImage(ctx, contextPath, dockerfile, tag); err != nil {
+		opts := driver.BuildOptions{
+			Dockerfile: service.Build.Dockerfile,
+			Target:     service.Build.Target,
+			NoCache:    service.Build.NoCache,
+		}
+
+		// Build args
+		if len(service.Build.Args) > 0 {
+			opts.Args = make(map[string]*string)
+			for k, v := range service.Build.Args {
+				opts.Args[k] = v
+			}
+		}
+
+		// Cache from
+		for _, cache := range service.Build.CacheFrom {
+			opts.CacheFrom = append(opts.CacheFrom, cache)
+		}
+
+		if err := o.driver.BuildImageWithOptions(ctx, contextPath, tag, opts); err != nil {
 			return fmt.Errorf("building %s: %w", name, err)
 		}
 	}

@@ -229,11 +229,41 @@ func (d *Driver) Logs(ctx context.Context, projectName string, services []string
 	return nil
 }
 
+// BuildOptions configures image build operations.
+type BuildOptions struct {
+	Dockerfile string
+	Args       map[string]*string
+	Target     string
+	CacheFrom  []string
+	NoCache    bool
+}
+
 // BuildImage builds an image from a Dockerfile context.
 func (d *Driver) BuildImage(ctx context.Context, contextPath string, dockerfile string, tag string) error {
+	return d.BuildImageWithOptions(ctx, contextPath, tag, BuildOptions{Dockerfile: dockerfile})
+}
+
+// BuildImageWithOptions builds an image with extended options.
+func (d *Driver) BuildImageWithOptions(ctx context.Context, contextPath string, tag string, opts BuildOptions) error {
 	args := []string{"image", "build", "-t", tag}
-	if dockerfile != "" {
-		args = append(args, "-f", dockerfile)
+	if opts.Dockerfile != "" {
+		args = append(args, "-f", opts.Dockerfile)
+	}
+	if opts.Target != "" {
+		args = append(args, "--target", opts.Target)
+	}
+	if opts.NoCache {
+		args = append(args, "--no-cache")
+	}
+	for _, cache := range opts.CacheFrom {
+		args = append(args, "--cache-from", cache)
+	}
+	for k, v := range opts.Args {
+		if v != nil {
+			args = append(args, "--build-arg", fmt.Sprintf("%s=%s", k, *v))
+		} else {
+			args = append(args, "--build-arg", k)
+		}
 	}
 	args = append(args, contextPath)
 
