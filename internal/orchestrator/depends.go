@@ -57,3 +57,42 @@ func dependencyOrder(project *types.Project) ([]string, error) {
 
 	return order, nil
 }
+
+// dependencyLevels groups services into parallel execution levels.
+// Services within the same level have no dependencies on each other
+// and can be started concurrently.
+func dependencyLevels(project *types.Project) ([][]string, error) {
+	order, err := dependencyOrder(project)
+	if err != nil {
+		return nil, err
+	}
+
+	// Assign each service a level = max(level of deps) + 1
+	levels := make(map[string]int)
+	for _, name := range order {
+		level := 0
+		service := project.Services[name]
+		for dep := range service.DependsOn {
+			if depLevel, ok := levels[dep]; ok && depLevel >= level {
+				level = depLevel + 1
+			}
+		}
+		levels[name] = level
+	}
+
+	// Group by level
+	maxLevel := 0
+	for _, l := range levels {
+		if l > maxLevel {
+			maxLevel = l
+		}
+	}
+
+	result := make([][]string, maxLevel+1)
+	for _, name := range order {
+		l := levels[name]
+		result[l] = append(result[l], name)
+	}
+
+	return result, nil
+}

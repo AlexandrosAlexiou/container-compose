@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/apple/container-compose/internal/converter"
 	"github.com/apple/container-compose/internal/driver"
@@ -59,8 +60,8 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 		}
 	}
 
-	// 4. Start services in dependency order
-	order, err := dependencyOrder(project)
+	// 4. Start services in dependency order, parallelizing independent services
+	levels, err := dependencyLevels(project)
 	if err != nil {
 		return fmt.Errorf("resolving dependencies: %w", err)
 	}
@@ -70,44 +71,64 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 	o.cancelMon = monCancel
 	rm := newRestartMonitor(o.driver)
 
-	for _, serviceName := range order {
-		service := project.Services[serviceName]
+	for _, level := range levels {
+		// Start all services in this level concurrently
+		var wg sync.WaitGroup
+		errCh := make(chan error, len(level))
 
-		// Wait for dependencies (health check aware)
-		if err := o.waitForDependencies(ctx, project.Name, service, serviceName); err != nil {
+		for _, serviceName := range level {
+			service := project.Services[serviceName]
+
+			wg.Add(1)
+			go func(svcName string, svc types.ServiceConfig) {
+				defer wg.Done()
+
+				// Wait for dependencies (health check aware)
+				if err := o.waitForDependencies(ctx, project.Name, svc, svcName); err != nil {
+					errCh <- fmt.Errorf("waiting for dependencies of %s: %w", svcName, err)
+					return
+				}
+
+				replicas := replicaCount(svcName, svc, opts.Scale)
+				restartInfo := formatRestartInfo(svc.Restart)
+
+				// Warn about unsupported multi-network
+				if len(svc.Networks) > 1 {
+					o.logger.Warnf("Service %s has %d networks; only the first will be attached (Apple Container does not support post-create network connect)", svcName, len(svc.Networks))
+				}
+
+				for i := 1; i <= replicas; i++ {
+					suffix := ""
+					if replicas > 1 {
+						suffix = fmt.Sprintf(" (%d/%d)", i, replicas)
+					}
+					o.logger.Infof("Starting service %s%s%s", svcName, suffix, restartInfo)
+
+					args := converter.ContainerRunArgsWithProject(project.Name, svc, svcName, i, project)
+					if err := o.driver.RunContainer(ctx, args); err != nil {
+						errCh <- fmt.Errorf("starting service %s replica %d: %w", svcName, i, err)
+						return
+					}
+
+					// Start restart monitor in background if policy is set
+					policy := parseRestartPolicy(svc.Restart)
+					if policy != RestartNo {
+						go rm.monitorAndRestart(monCtx, project.Name, svcName, policy, args)
+					}
+				}
+
+				o.logger.Successf("Service %s started (%d replica(s))", svcName, replicas)
+			}(serviceName, service)
+		}
+
+		wg.Wait()
+		close(errCh)
+
+		// Collect errors from this level
+		for err := range errCh {
 			monCancel()
-			return fmt.Errorf("waiting for dependencies of %s: %w", serviceName, err)
+			return err
 		}
-
-		replicas := replicaCount(serviceName, service, opts.Scale)
-		restartInfo := formatRestartInfo(service.Restart)
-
-		// Warn about unsupported multi-network (Apple Container has no "network connect")
-		if len(service.Networks) > 1 {
-			o.logger.Warnf("Service %s has %d networks; only the first will be attached (Apple Container does not support post-create network connect)", serviceName, len(service.Networks))
-		}
-
-		for i := 1; i <= replicas; i++ {
-			suffix := ""
-			if replicas > 1 {
-				suffix = fmt.Sprintf(" (%d/%d)", i, replicas)
-			}
-			o.logger.Infof("Starting service %s%s%s", serviceName, suffix, restartInfo)
-
-			args := converter.ContainerRunArgsWithProject(project.Name, service, serviceName, i, project)
-			if err := o.driver.RunContainer(ctx, args); err != nil {
-				monCancel()
-				return fmt.Errorf("starting service %s replica %d: %w", serviceName, i, err)
-			}
-
-			// Start restart monitor in background if policy is set
-			policy := parseRestartPolicy(service.Restart)
-			if policy != RestartNo {
-				go rm.monitorAndRestart(monCtx, project.Name, serviceName, policy, args)
-			}
-		}
-
-		o.logger.Successf("Service %s started (%d replica(s))", serviceName, replicas)
 	}
 
 	return nil
@@ -170,6 +191,18 @@ func (o *Orchestrator) Down(ctx context.Context, project *types.Project, opts Do
 	// Always try to remove the default network
 	if err := o.driver.DeleteNetwork(ctx, defaultNet); err != nil {
 		o.logger.Warnf("Failed to remove network %s: %v", defaultNet, err)
+	}
+
+	// Remove orphan containers (containers belonging to the project but not defined in the compose file)
+	if opts.RemoveOrphans {
+		containers, _ := o.driver.ListContainers(ctx, project.Name)
+		for _, c := range containers {
+			if _, exists := project.Services[c.Service]; !exists {
+				o.logger.Infof("Removing orphan container %s", c.Name)
+				_ = o.driver.StopContainer(ctx, c.Name)
+				_ = o.driver.DeleteContainer(ctx, c.Name)
+			}
+		}
 	}
 
 	// 3. Remove volumes if requested
