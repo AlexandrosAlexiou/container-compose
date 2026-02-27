@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/apple/container-compose/internal/converter"
+	"github.com/apple/container-compose/internal/credentials"
 	"github.com/apple/container-compose/internal/driver"
 	"github.com/apple/container-compose/internal/output"
 	"github.com/compose-spec/compose-go/v2/types"
@@ -57,14 +58,17 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 		return fmt.Errorf("creating volumes: %w", err)
 	}
 
-	// 3. Build images if requested
+	// 3. Auto-login to registries using Docker credential store
+	o.syncDockerCredentials(ctx, project)
+
+	// 4. Build images if requested
 	if opts.Build {
 		if err := o.buildImages(ctx, project); err != nil {
 			return fmt.Errorf("building images: %w", err)
 		}
 	}
 
-	// 4. Start services in dependency order, parallelizing independent services
+	// 5. Start services in dependency order, parallelizing independent services
 	levels, err := dependencyLevels(project)
 	if err != nil {
 		return fmt.Errorf("resolving dependencies: %w", err)
@@ -141,12 +145,12 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 		}
 	}
 
-	// 5. Set up service discovery (/etc/hosts entries for service name resolution)
+	// 6. Set up service discovery (/etc/hosts entries for service name resolution)
 	if err := o.setupServiceDiscovery(ctx, project, opts.Scale); err != nil {
 		o.logger.Warnf("Service discovery setup partially failed: %v", err)
 	}
 
-	// 6. Apply shm_size by remounting /dev/shm with the correct size
+	// 7. Apply shm_size by remounting /dev/shm with the correct size
 	o.applyShmSize(ctx, project, opts.Scale)
 
 	return nil
@@ -293,6 +297,81 @@ func (o *Orchestrator) findService(projectName, serviceName string) *types.Servi
 		return &svc
 	}
 	return nil
+}
+
+// syncDockerCredentials checks if any service images come from registries
+// where Docker has stored credentials (via `az acr login`, `docker login`, etc.)
+// and automatically logs in to Apple Container's registry store if needed.
+func (o *Orchestrator) syncDockerCredentials(ctx context.Context, project *types.Project) {
+	// Collect unique registries from all service images
+	registries := make(map[string]bool)
+	for _, service := range project.Services {
+		if service.Image == "" {
+			continue
+		}
+		registry := extractRegistry(service.Image)
+		if registry != "" {
+			registries[registry] = true
+		}
+	}
+
+	if len(registries) == 0 {
+		return
+	}
+
+	for registry := range registries {
+		// Skip if Apple Container already has credentials
+		if o.driver.IsRegistryLoggedIn(ctx, registry) {
+			o.logger.Debugf("Already logged in to %s", registry)
+			continue
+		}
+
+		// Try to get credentials from Docker's credential store
+		cred, err := credentials.GetCredential(registry)
+		if err != nil {
+			o.logger.Debugf("No Docker credentials for %s: %v", registry, err)
+			continue
+		}
+
+		o.logger.Infof("Syncing Docker credentials for %s", registry)
+		if err := o.driver.RegistryLogin(ctx, registry, cred.Username, cred.Secret); err != nil {
+			o.logger.Warnf("Auto-login to %s failed: %v", registry, err)
+		} else {
+			o.logger.Successf("Logged in to %s (from Docker credentials)", registry)
+		}
+	}
+}
+
+// extractRegistry returns the registry hostname from an image reference.
+// Returns empty string for Docker Hub images (no explicit registry).
+func extractRegistry(image string) string {
+	// Remove tag/digest
+	ref := image
+	if i := strings.LastIndex(ref, "@"); i >= 0 {
+		ref = ref[:i]
+	}
+	if i := strings.LastIndex(ref, ":"); i >= 0 {
+		// Make sure this is a tag, not a port number
+		afterColon := ref[i+1:]
+		if !strings.Contains(afterColon, "/") {
+			ref = ref[:i]
+		}
+	}
+
+	// If no slash, it's a Docker Hub official image (e.g., "nginx")
+	parts := strings.SplitN(ref, "/", 2)
+	if len(parts) < 2 {
+		return ""
+	}
+
+	// If first part contains a dot or colon, it's a registry
+	// e.g., "myregistry.azurecr.io/myimage" or "localhost:5000/myimage"
+	if strings.Contains(parts[0], ".") || strings.Contains(parts[0], ":") {
+		return parts[0]
+	}
+
+	// Otherwise it's a Docker Hub user/image (e.g., "library/nginx")
+	return ""
 }
 
 // applyShmSize remounts /dev/shm with the requested size for services that

@@ -395,6 +395,37 @@ func (d *Driver) KillContainer(ctx context.Context, name string, signal string) 
 	return nil
 }
 
+// RegistryLogin logs in to a container registry.
+func (d *Driver) RegistryLogin(ctx context.Context, server, username, secret string) error {
+	args := []string{"registry", "login"}
+	if username != "" {
+		args = append(args, "--username", username)
+	}
+	args = append(args, "--password-stdin", server)
+
+	d.logger.Debugf("Registry login: %s (user=%s)", server, username)
+	cmd := exec.CommandContext(ctx, containerBinary, args...)
+	cmd.Stdin = strings.NewReader(secret)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("registry login to %s failed: %w\n%s", server, err, stderr.String())
+	}
+	return nil
+}
+
+// IsRegistryLoggedIn checks if Apple Container already has credentials for a registry.
+func (d *Driver) IsRegistryLoggedIn(ctx context.Context, server string) bool {
+	cmd := exec.CommandContext(ctx, containerBinary, "registry", "list")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(out), server)
+}
+
 // PullImage pulls an image from a registry.
 func (d *Driver) PullImage(ctx context.Context, image string, platform string) error {
 	args := []string{"image", "pull"}
