@@ -49,6 +49,11 @@ func ContainerRunArgsWithProject(projectName string, service types.ServiceConfig
 		args = append(args, "-p", portStr)
 	}
 
+	// Expose (document internal ports, no host binding)
+	for _, expose := range service.Expose {
+		args = append(args, "--expose", expose)
+	}
+
 	// Volumes / bind mounts
 	for _, vol := range service.Volumes {
 		volStr := formatVolume(projectName, vol)
@@ -83,6 +88,11 @@ func ContainerRunArgsWithProject(projectName string, service types.ServiceConfig
 		args = append(args, "-u", service.User)
 	}
 
+	// Additional groups
+	for _, group := range service.GroupAdd {
+		args = append(args, "--group-add", group)
+	}
+
 	// Entrypoint: only the executable; extra args become part of the command
 	if len(service.Entrypoint) > 0 {
 		args = append(args, "--entrypoint", service.Entrypoint[0])
@@ -108,6 +118,11 @@ func ContainerRunArgsWithProject(projectName string, service types.ServiceConfig
 		for _, search := range service.DNSSearch {
 			args = append(args, "--dns-search", search)
 		}
+	}
+
+	// DNS options
+	for _, opt := range service.DNSOpts {
+		args = append(args, "--dns-option", opt)
 	}
 
 	// DNS domain: set to project name for service discovery
