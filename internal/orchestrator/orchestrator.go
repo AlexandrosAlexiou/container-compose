@@ -92,7 +92,7 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 				defer wg.Done()
 
 				// Wait for dependencies (health check aware)
-				if err := o.waitForDependencies(ctx, project.Name, svc, svcName); err != nil {
+				if err := o.waitForDependencies(ctx, project.Name, svc); err != nil {
 					errCh <- fmt.Errorf("waiting for dependencies of %s: %w", svcName, err)
 					return
 				}
@@ -289,7 +289,7 @@ func (o *Orchestrator) createVolumes(ctx context.Context, project *types.Project
 }
 
 // findService looks up a service by name in the current project.
-func (o *Orchestrator) findService(projectName, serviceName string) *types.ServiceConfig {
+func (o *Orchestrator) findService(serviceName string) *types.ServiceConfig {
 	if o.project == nil {
 		return nil
 	}

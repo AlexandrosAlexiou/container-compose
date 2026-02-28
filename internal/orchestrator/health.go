@@ -74,11 +74,12 @@ func checkHealthExec(ctx context.Context, d *driver.Driver, containerName string
 	// If healthcheck has a test command, exec it inside the container
 	if healthcheck != nil && len(healthcheck.Test) > 0 {
 		var cmd []string
-		if healthcheck.Test[0] == "CMD" {
+		switch healthcheck.Test[0] {
+		case "CMD":
 			cmd = healthcheck.Test[1:]
-		} else if healthcheck.Test[0] == "CMD-SHELL" {
+		case "CMD-SHELL":
 			cmd = []string{"sh", "-c", strings.Join(healthcheck.Test[1:], " ")}
-		} else {
+		default:
 			// Bare command
 			cmd = healthcheck.Test
 		}
@@ -103,11 +104,11 @@ func checkHealth(ctx context.Context, containerName string) (bool, error) {
 
 	// Handle array or single object response
 	var status string
-	var arr []map[string]interface{}
+	var arr []map[string]any
 	if err := json.Unmarshal(out, &arr); err == nil && len(arr) > 0 {
 		status, _ = arr[0]["status"].(string)
 	} else {
-		var result map[string]interface{}
+		var result map[string]any
 		if err := json.Unmarshal(out, &result); err != nil {
 			return false, err
 		}
@@ -123,10 +124,10 @@ func shouldWaitForHealthy(dep types.ServiceDependency) bool {
 }
 
 // waitForDependencies waits for all dependencies of a service to be ready.
-func (o *Orchestrator) waitForDependencies(ctx context.Context, projectName string, service types.ServiceConfig, serviceName string) error {
+func (o *Orchestrator) waitForDependencies(ctx context.Context, projectName string, service types.ServiceConfig) error {
 	for depName, dep := range service.DependsOn {
 		// Respect container_name override for the dependency
-		depService := o.findService(projectName, depName)
+		depService := o.findService(depName)
 		containerName := converter.ContainerName(projectName, depName, 1)
 		if depService != nil && depService.ContainerName != "" {
 			containerName = depService.ContainerName

@@ -101,13 +101,6 @@ func parseRestartPolicy(policy string) RestartPolicy {
 	}
 }
 
-func min(a, b time.Duration) time.Duration {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // formatRestartInfo returns a description of restart policy for logging.
 func formatRestartInfo(policy string) string {
 	if policy == "" || policy == "no" {
