@@ -1,3 +1,4 @@
+// Package cli implements the container-compose command-line interface using cobra.
 package cli
 
 import (

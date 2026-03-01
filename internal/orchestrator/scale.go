@@ -1,3 +1,5 @@
+// Package orchestrator manages the lifecycle of a compose project, including dependency ordering,
+// service discovery, health checks, and restart policies.
 package orchestrator
 
 import (
