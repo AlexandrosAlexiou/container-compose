@@ -185,7 +185,7 @@ func (d *Driver) ListContainers(ctx context.Context, projectName string) ([]Cont
 		return nil, nil
 	}
 
-	var rawContainers []map[string]interface{}
+	var rawContainers []map[string]any
 	if err := json.Unmarshal(out, &rawContainers); err != nil {
 		return nil, fmt.Errorf("parsing container list: %w", err)
 	}
@@ -197,7 +197,7 @@ func (d *Driver) ListContainers(ctx context.Context, projectName string) ([]Cont
 		status := ""
 		ports := ""
 
-		if config, ok := raw["configuration"].(map[string]interface{}); ok {
+		if config, ok := raw["configuration"].(map[string]any); ok {
 			name, _ = config["id"].(string)
 			ports = formatPublishedPorts(config)
 		}
@@ -335,15 +335,15 @@ func extractServiceFromName(containerName, projectName string) string {
 
 // formatPublishedPorts extracts port mappings from the configuration JSON.
 // Format: "0.0.0.0:8080->80/tcp"
-func formatPublishedPorts(config map[string]interface{}) string {
-	portsRaw, ok := config["publishedPorts"].([]interface{})
+func formatPublishedPorts(config map[string]any) string {
+	portsRaw, ok := config["publishedPorts"].([]any)
 	if !ok || len(portsRaw) == 0 {
 		return ""
 	}
 
 	var parts []string
 	for _, p := range portsRaw {
-		port, ok := p.(map[string]interface{})
+		port, ok := p.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -365,7 +365,7 @@ func formatPublishedPorts(config map[string]interface{}) string {
 	return strings.Join(parts, ", ")
 }
 
-func intFromJSON(v interface{}) int {
+func intFromJSON(v any) int {
 	switch n := v.(type) {
 	case float64:
 		return int(n)
@@ -453,7 +453,7 @@ func (d *Driver) PushImage(ctx context.Context, image string) error {
 }
 
 // InspectContainer returns raw JSON inspect output for a container.
-func (d *Driver) InspectContainer(ctx context.Context, name string) (map[string]interface{}, error) {
+func (d *Driver) InspectContainer(ctx context.Context, name string) (map[string]any, error) {
 	cmd := exec.CommandContext(ctx, containerBinary, "inspect", name)
 
 	var stderr bytes.Buffer
@@ -465,10 +465,10 @@ func (d *Driver) InspectContainer(ctx context.Context, name string) (map[string]
 	}
 
 	// Apple Container inspect returns a JSON array with one element
-	var arr []map[string]interface{}
+	var arr []map[string]any
 	if err := json.Unmarshal(out, &arr); err != nil {
 		// Fallback: try parsing as single object
-		var result map[string]interface{}
+		var result map[string]any
 		if err2 := json.Unmarshal(out, &result); err2 != nil {
 			return nil, fmt.Errorf("parsing inspect output: %w", err)
 		}
@@ -487,12 +487,12 @@ func (d *Driver) GetContainerIP(ctx context.Context, name string) (string, error
 		return "", err
 	}
 
-	networks, ok := info["networks"].([]interface{})
+	networks, ok := info["networks"].([]any)
 	if !ok || len(networks) == 0 {
 		return "", fmt.Errorf("no networks found for container %s", name)
 	}
 
-	net, ok := networks[0].(map[string]interface{})
+	net, ok := networks[0].(map[string]any)
 	if !ok {
 		return "", fmt.Errorf("invalid network info for container %s", name)
 	}
@@ -515,12 +515,12 @@ func (d *Driver) GetContainerGateway(ctx context.Context, name string) (string, 
 		return "", err
 	}
 
-	networks, ok := info["networks"].([]interface{})
+	networks, ok := info["networks"].([]any)
 	if !ok || len(networks) == 0 {
 		return "", fmt.Errorf("no networks found for container %s", name)
 	}
 
-	net, ok := networks[0].(map[string]interface{})
+	net, ok := networks[0].(map[string]any)
 	if !ok {
 		return "", fmt.Errorf("invalid network info for container %s", name)
 	}
@@ -592,7 +592,7 @@ func (d *Driver) TopContainer(ctx context.Context, name string) error {
 }
 
 // ImageList lists images matching a filter.
-func (d *Driver) ImageList(ctx context.Context) ([]map[string]interface{}, error) {
+func (d *Driver) ImageList(ctx context.Context) ([]map[string]any, error) {
 	cmd := exec.CommandContext(ctx, containerBinary, "image", "list", "--format", "json")
 
 	var stderr bytes.Buffer
@@ -607,11 +607,11 @@ func (d *Driver) ImageList(ctx context.Context) ([]map[string]interface{}, error
 		return nil, nil
 	}
 
-	var images []map[string]interface{}
+	var images []map[string]any
 	if err := json.Unmarshal(out, &images); err != nil {
 		// Try line-by-line
-		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-			var img map[string]interface{}
+		for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+			var img map[string]any
 			if err := json.Unmarshal([]byte(line), &img); err != nil {
 				continue
 			}
