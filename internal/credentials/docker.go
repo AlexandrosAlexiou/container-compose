@@ -1,3 +1,4 @@
+// Package credentials reads Docker's credential store to sync registry auth with Apple Container.
 package credentials
 
 import (

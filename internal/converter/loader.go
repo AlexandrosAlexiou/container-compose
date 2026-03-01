@@ -1,3 +1,4 @@
+// Package converter translates Docker Compose service definitions into Apple Container CLI arguments.
 package converter
 
 import (

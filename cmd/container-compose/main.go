@@ -1,3 +1,4 @@
+// Package main is the entry point for the container-compose CLI.
 package main
 
 import (

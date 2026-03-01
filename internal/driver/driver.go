@@ -1,3 +1,4 @@
+// Package driver wraps the Apple Container CLI for container, network, volume, and registry operations.
 package driver
 
 import (

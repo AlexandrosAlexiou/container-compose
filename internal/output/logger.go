@@ -1,3 +1,4 @@
+// Package output provides formatted, color-coded logging for compose operations.
 package output
 
 import (
