@@ -12,7 +12,8 @@ func ContainerRunArgs(projectName string, service types.ServiceConfig, serviceNa
 	return ContainerRunArgsWithProject(projectName, service, serviceName, replica, nil)
 }
 
-// Only flags actually supported by Apple Container CLI are emitted.
+// ContainerRunArgsWithProject builds the full `container run` argument list,
+// emitting only flags actually supported by Apple Container CLI.
 func ContainerRunArgsWithProject(projectName string, service types.ServiceConfig, serviceName string, replica int, project *types.Project) []string {
 	containerName := ContainerName(projectName, serviceName, replica)
 

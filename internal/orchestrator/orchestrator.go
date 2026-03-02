@@ -4,6 +4,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 
@@ -346,10 +347,7 @@ func (o *Orchestrator) applyShmSize(ctx context.Context, project *types.Project,
 			continue
 		}
 
-		shmSizeMB := service.ShmSize / (1024 * 1024)
-		if shmSizeMB < 1 {
-			shmSizeMB = 1
-		}
+		shmSizeMB := max(service.ShmSize/(1024*1024), 1)
 
 		replicas := replicaCount(serviceName, service, scaleMap)
 		for i := 1; i <= replicas; i++ {
@@ -393,9 +391,7 @@ func (o *Orchestrator) buildImages(ctx context.Context, project *types.Project) 
 
 		if len(service.Build.Args) > 0 {
 			opts.Args = make(map[string]*string)
-			for k, v := range service.Build.Args {
-				opts.Args[k] = v
-			}
+			maps.Copy(opts.Args, service.Build.Args)
 		}
 
 		for _, cache := range service.Build.CacheFrom {
