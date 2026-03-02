@@ -1,5 +1,4 @@
 // Package orchestrator manages the lifecycle of a compose project, including dependency ordering,
-// service discovery, health checks, and restart policies.
 package orchestrator
 
 import (
@@ -15,7 +14,6 @@ import (
 	"github.com/compose-spec/compose-go/v2/types"
 )
 
-// Orchestrator manages the lifecycle of a compose project.
 type Orchestrator struct {
 	driver    *driver.Driver
 	logger    *output.Logger
@@ -23,66 +21,54 @@ type Orchestrator struct {
 	project   *types.Project     // current project (set during Up)
 }
 
-// UpOptions configures the up operation.
 type UpOptions struct {
 	Detach bool
 	Build  bool
 	Scale  map[string]int // service name -> replica count
 }
 
-// DownOptions configures the down operation.
 type DownOptions struct {
 	RemoveVolumes bool
 	RemoveOrphans bool
 }
 
-// New creates a new Orchestrator.
 func New(d *driver.Driver, logger *output.Logger) *Orchestrator {
 	return &Orchestrator{driver: d, logger: logger}
 }
 
-// Up creates and starts all services in dependency order.
 func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOptions) error {
 	o.project = project
 
-	// 0. Validate port conflicts
 	if err := checkPortConflicts(project, opts.Scale); err != nil {
 		return err
 	}
 
-	// 1. Create networks
 	if err := o.createNetworks(ctx, project); err != nil {
 		return fmt.Errorf("creating networks: %w", err)
 	}
 
-	// 2. Create volumes
 	if err := o.createVolumes(ctx, project); err != nil {
 		return fmt.Errorf("creating volumes: %w", err)
 	}
 
-	// 3. Auto-login to registries using Docker credential store
 	o.syncDockerCredentials(ctx, project)
 
-	// 4. Build images if requested
 	if opts.Build {
 		if err := o.buildImages(ctx, project); err != nil {
 			return fmt.Errorf("building images: %w", err)
 		}
 	}
 
-	// 5. Start services in dependency order, parallelizing independent services
 	levels, err := dependencyLevels(project)
 	if err != nil {
 		return fmt.Errorf("resolving dependencies: %w", err)
 	}
 
-	// Separate long-lived context for restart monitors (cancelled on Down)
 	monCtx, monCancel := context.WithCancel(context.Background())
 	o.cancelMon = monCancel
 	rm := newRestartMonitor(o.driver)
 
 	for _, level := range levels {
-		// Start all services in this level concurrently
 		var wg sync.WaitGroup
 		errCh := make(chan error, len(level))
 
@@ -93,7 +79,6 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 			go func(svcName string, svc types.ServiceConfig) {
 				defer wg.Done()
 
-				// Wait for dependencies (health check aware)
 				if err := o.waitForDependencies(ctx, project.Name, svc); err != nil {
 					errCh <- fmt.Errorf("waiting for dependencies of %s: %w", svcName, err)
 					return
@@ -102,7 +87,6 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 				replicas := replicaCount(svcName, svc, opts.Scale)
 				restartInfo := formatRestartInfo(svc.Restart)
 
-				// Warn about unsupported multi-network
 				if len(svc.Networks) > 1 {
 					o.logger.Warnf("Service %s has %d networks; only the first will be attached (Apple Container does not support post-create network connect)", svcName, len(svc.Networks))
 				}
@@ -116,7 +100,6 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 
 					containerName := converter.ContainerName(project.Name, svcName, i)
 
-					// Remove any existing container with the same name
 					_ = o.driver.StopContainer(ctx, containerName)
 					_ = o.driver.ForceDeleteContainer(ctx, containerName)
 
@@ -126,7 +109,6 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 						return
 					}
 
-					// Start restart monitor in background if policy is set
 					policy := parseRestartPolicy(svc.Restart)
 					if policy != RestartNo {
 						go rm.monitorAndRestart(monCtx, project.Name, svcName, policy, args)
@@ -140,7 +122,6 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 		wg.Wait()
 		close(errCh)
 
-		// Collect errors from this level
 		for err := range errCh {
 			monCancel()
 			return err
@@ -158,27 +139,22 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 	return nil
 }
 
-// Down stops and removes all services, networks, and optionally volumes.
 func (o *Orchestrator) Down(ctx context.Context, project *types.Project, opts DownOptions) error {
-	// Cancel any active restart monitors
 	if o.cancelMon != nil {
 		o.cancelMon()
 	}
 
-	// 1. Stop and remove containers in reverse dependency order
 	order, err := dependencyOrder(project)
 	if err != nil {
 		return fmt.Errorf("resolving dependencies: %w", err)
 	}
 
-	// Reverse order for teardown — stop all replicas of each service
 	for i := len(order) - 1; i >= 0; i-- {
 		serviceName := order[i]
 		service := project.Services[serviceName]
 
 		o.logger.Infof("Stopping service %s", serviceName)
 
-		// Find all running replicas via listing
 		containers, _ := o.driver.ListContainers(ctx, project.Name)
 		stopped := false
 		for _, c := range containers {
@@ -201,7 +177,6 @@ func (o *Orchestrator) Down(ctx context.Context, project *types.Project, opts Do
 			}
 			_ = o.driver.StopContainer(ctx, containerName)
 			_ = o.driver.ForceDeleteContainer(ctx, containerName)
-			// Also try the generated name if we used container_name above
 			if service.ContainerName != "" {
 				genName := converter.ContainerName(project.Name, serviceName, 1)
 				_ = o.driver.StopContainer(ctx, genName)
@@ -210,7 +185,6 @@ func (o *Orchestrator) Down(ctx context.Context, project *types.Project, opts Do
 		}
 	}
 
-	// 2. Remove networks (including default)
 	defaultNet := converter.NetworkName(project.Name, "default")
 	deletedNets := make(map[string]bool)
 	for name := range project.Networks {
@@ -227,7 +201,6 @@ func (o *Orchestrator) Down(ctx context.Context, project *types.Project, opts Do
 		}
 	}
 
-	// Remove orphan containers (containers belonging to the project but not defined in the compose file)
 	if opts.RemoveOrphans {
 		containers, _ := o.driver.ListContainers(ctx, project.Name)
 		for _, c := range containers {
@@ -239,7 +212,6 @@ func (o *Orchestrator) Down(ctx context.Context, project *types.Project, opts Do
 		}
 	}
 
-	// 3. Remove volumes if requested
 	if opts.RemoveVolumes {
 		for name := range project.Volumes {
 			volumeName := converter.VolumeName(project.Name, name)
@@ -256,7 +228,6 @@ func (o *Orchestrator) Down(ctx context.Context, project *types.Project, opts Do
 func (o *Orchestrator) createNetworks(ctx context.Context, project *types.Project) error {
 	defaultNet := converter.NetworkName(project.Name, "default")
 
-	// Check if any service needs the default network (no explicit networks defined)
 	needsDefault := false
 	for _, service := range project.Services {
 		if len(service.Networks) == 0 {
@@ -290,7 +261,6 @@ func (o *Orchestrator) createVolumes(ctx context.Context, project *types.Project
 	return nil
 }
 
-// findService looks up a service by name in the current project.
 func (o *Orchestrator) findService(serviceName string) *types.ServiceConfig {
 	if o.project == nil {
 		return nil
@@ -301,11 +271,7 @@ func (o *Orchestrator) findService(serviceName string) *types.ServiceConfig {
 	return nil
 }
 
-// syncDockerCredentials checks if any service images come from registries
-// where Docker has stored credentials (via `az acr login`, `docker login`, etc.)
-// and automatically logs in to Apple Container's registry store if needed.
 func (o *Orchestrator) syncDockerCredentials(ctx context.Context, project *types.Project) {
-	// Collect unique registries from all service images
 	registries := make(map[string]bool)
 	for _, service := range project.Services {
 		if service.Image == "" {
@@ -322,13 +288,11 @@ func (o *Orchestrator) syncDockerCredentials(ctx context.Context, project *types
 	}
 
 	for registry := range registries {
-		// Skip if Apple Container already has credentials
 		if o.driver.IsRegistryLoggedIn(ctx, registry) {
 			o.logger.Debugf("Already logged in to %s", registry)
 			continue
 		}
 
-		// Try to get credentials from Docker's credential store
 		cred, err := credentials.GetCredential(registry)
 		if err != nil {
 			o.logger.Warnf("No credentials for %s. If pulls fail, run: container-compose login %s", registry, registry)
@@ -344,10 +308,8 @@ func (o *Orchestrator) syncDockerCredentials(ctx context.Context, project *types
 	}
 }
 
-// extractRegistry returns the registry hostname from an image reference.
 // Returns empty string for Docker Hub images (no explicit registry).
 func extractRegistry(image string) string {
-	// Remove tag/digest
 	ref := image
 	if i := strings.LastIndex(ref, "@"); i >= 0 {
 		ref = ref[:i]
@@ -367,7 +329,6 @@ func extractRegistry(image string) string {
 	}
 
 	// If first part contains a dot or colon, it's a registry
-	// e.g., "myregistry.azurecr.io/myimage" or "localhost:5000/myimage"
 	if strings.Contains(parts[0], ".") || strings.Contains(parts[0], ":") {
 		return parts[0]
 	}
@@ -430,7 +391,6 @@ func (o *Orchestrator) buildImages(ctx context.Context, project *types.Project) 
 			NoCache:    service.Build.NoCache,
 		}
 
-		// Build args
 		if len(service.Build.Args) > 0 {
 			opts.Args = make(map[string]*string)
 			for k, v := range service.Build.Args {
@@ -438,7 +398,6 @@ func (o *Orchestrator) buildImages(ctx context.Context, project *types.Project) 
 			}
 		}
 
-		// Cache from
 		for _, cache := range service.Build.CacheFrom {
 			opts.CacheFrom = append(opts.CacheFrom, cache)
 		}
@@ -466,11 +425,9 @@ func (o *Orchestrator) setupServiceDiscovery(ctx context.Context, project *types
 	var containerNames []string
 	var gatewayIP string
 
-	// Collect IPs for all running containers
 	for serviceName, service := range project.Services {
 		replicas := replicaCount(serviceName, service, scaleMap)
 		for i := 1; i <= replicas; i++ {
-			// Determine the actual container name (respects container_name override)
 			containerName := converter.ContainerName(project.Name, serviceName, i)
 			if service.ContainerName != "" {
 				containerName = service.ContainerName
@@ -504,7 +461,6 @@ func (o *Orchestrator) setupServiceDiscovery(ctx context.Context, project *types
 		return nil
 	}
 
-	// Build hosts content
 	var hostsLines []string
 
 	// Add host.docker.internal and gateway.docker.internal -> gateway IP
@@ -513,13 +469,11 @@ func (o *Orchestrator) setupServiceDiscovery(ctx context.Context, project *types
 			fmt.Sprintf("%s host.docker.internal gateway.docker.internal", gatewayIP))
 	}
 
-	// Add service name, container name, container_name, and hostname aliases
 	for _, e := range entries {
 		names := e.serviceName
 		if e.container != e.serviceName {
 			names += " " + e.container
 		}
-		// Add explicit container_name alias if different from both
 		if e.containerName != "" && e.containerName != e.serviceName && e.containerName != e.container {
 			names += " " + e.containerName
 		}

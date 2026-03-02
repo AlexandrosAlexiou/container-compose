@@ -41,7 +41,6 @@ func newUpCmd() *cobra.Command {
 				return fmt.Errorf("loading compose file: %w", err)
 			}
 
-			// Parse --scale flags
 			scaleMap, err := parseScaleFlags(scale)
 			if err != nil {
 				return err

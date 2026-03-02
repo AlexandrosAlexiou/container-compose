@@ -1,5 +1,4 @@
 // Package orchestrator manages the lifecycle of a compose project, including dependency ordering,
-// service discovery, health checks, and restart policies.
 package orchestrator
 
 import (
@@ -15,9 +14,6 @@ import (
 	"github.com/compose-spec/compose-go/v2/types"
 )
 
-// waitForHealthy polls a container's health status until healthy or timeout.
-// If a healthcheck command is defined in the compose service, it will exec that
-// command inside the container. Otherwise, it just checks container status.
 func waitForHealthy(ctx context.Context, d *driver.Driver, containerName string, healthcheck *types.HealthCheckConfig, timeout time.Duration) error {
 	if timeout == 0 {
 		timeout = 60 * time.Second
@@ -70,10 +66,7 @@ func waitForHealthy(ctx context.Context, d *driver.Driver, containerName string,
 	}
 }
 
-// checkHealthExec runs the healthcheck command inside the container if defined,
-// otherwise falls back to checking container status.
 func checkHealthExec(ctx context.Context, d *driver.Driver, containerName string, healthcheck *types.HealthCheckConfig) (bool, error) {
-	// If healthcheck has a test command, exec it inside the container
 	if healthcheck != nil && len(healthcheck.Test) > 0 {
 		var cmd []string
 		switch healthcheck.Test[0] {
@@ -82,7 +75,6 @@ func checkHealthExec(ctx context.Context, d *driver.Driver, containerName string
 		case "CMD-SHELL":
 			cmd = []string{"sh", "-c", strings.Join(healthcheck.Test[1:], " ")}
 		default:
-			// Bare command
 			cmd = healthcheck.Test
 		}
 
@@ -96,7 +88,6 @@ func checkHealthExec(ctx context.Context, d *driver.Driver, containerName string
 	return checkHealth(ctx, containerName)
 }
 
-// checkHealth inspects a container and returns whether it reports running.
 func checkHealth(ctx context.Context, containerName string) (bool, error) {
 	cmd := exec.CommandContext(ctx, "container", "inspect", containerName)
 	out, err := cmd.Output()
@@ -104,7 +95,6 @@ func checkHealth(ctx context.Context, containerName string) (bool, error) {
 		return false, err
 	}
 
-	// Handle array or single object response
 	var status string
 	var arr []map[string]any
 	if err := json.Unmarshal(out, &arr); err == nil && len(arr) > 0 {
@@ -120,15 +110,12 @@ func checkHealth(ctx context.Context, containerName string) (bool, error) {
 	return strings.EqualFold(status, "running"), nil
 }
 
-// shouldWaitForHealthy returns true if the dependency has a service_healthy condition.
 func shouldWaitForHealthy(dep types.ServiceDependency) bool {
 	return dep.Condition == "service_healthy"
 }
 
-// waitForDependencies waits for all dependencies of a service to be ready.
 func (o *Orchestrator) waitForDependencies(ctx context.Context, projectName string, service types.ServiceConfig) error {
 	for depName, dep := range service.DependsOn {
-		// Respect container_name override for the dependency
 		depService := o.findService(depName)
 		containerName := converter.ContainerName(projectName, depName, 1)
 		if depService != nil && depService.ContainerName != "" {
@@ -139,7 +126,6 @@ func (o *Orchestrator) waitForDependencies(ctx context.Context, projectName stri
 			o.logger.Infof("Waiting for %s to be healthy...", depName)
 			timeout := 120 * time.Second
 
-			// Get the healthcheck config from the dependency service
 			var healthcheck *types.HealthCheckConfig
 			if depService != nil {
 				healthcheck = depService.HealthCheck
@@ -150,7 +136,6 @@ func (o *Orchestrator) waitForDependencies(ctx context.Context, projectName stri
 			}
 			o.logger.Successf("Dependency %s is healthy", depName)
 		} else {
-			// service_started: just check it exists/is running
 			o.logger.Debugf("Dependency %s started (no health wait)", depName)
 		}
 	}

@@ -9,7 +9,6 @@ import (
 	"github.com/compose-spec/compose-go/v2/types"
 )
 
-// ProjectOptions holds options for loading a compose project.
 type ProjectOptions struct {
 	ConfigPaths []string
 	ProjectName string
@@ -18,7 +17,6 @@ type ProjectOptions struct {
 	EnvFiles    []string
 }
 
-// LoadProject loads and parses a compose file into a Project.
 func LoadProject(opts ProjectOptions) (*types.Project, error) {
 	cliOpts := []cli.ProjectOptionsFn{
 		cli.WithWorkingDirectory(opts.ProjectDir),
@@ -36,7 +34,6 @@ func LoadProject(opts ProjectOptions) (*types.Project, error) {
 		cliOpts = append(cliOpts, cli.WithEnvFiles(opts.EnvFiles...))
 	}
 
-	// When no config paths are explicitly given, allow env-based and default file discovery
 	if len(opts.ConfigPaths) == 0 {
 		cliOpts = append(cliOpts, cli.WithConfigFileEnv)
 		cliOpts = append(cliOpts, cli.WithDefaultConfigPath)

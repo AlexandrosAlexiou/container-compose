@@ -1,5 +1,4 @@
 // Package orchestrator manages the lifecycle of a compose project, including dependency ordering,
-// service discovery, health checks, and restart policies.
 package orchestrator
 
 import (
@@ -8,9 +7,7 @@ import (
 	"github.com/compose-spec/compose-go/v2/types"
 )
 
-// dependencyOrder returns services in topological order based on depends_on.
 func dependencyOrder(project *types.Project) ([]string, error) {
-	// Build adjacency list
 	deps := make(map[string][]string)
 	allServices := make(map[string]bool)
 
@@ -36,7 +33,6 @@ func dependencyOrder(project *types.Project) ([]string, error) {
 
 		visited[name] = 1
 
-		// Visit dependencies first
 		for _, dep := range deps[name] {
 			if !allServices[dep] {
 				return fmt.Errorf("service %q depends on %q which is not defined", name, dep)
@@ -60,9 +56,7 @@ func dependencyOrder(project *types.Project) ([]string, error) {
 	return order, nil
 }
 
-// dependencyLevels groups services into parallel execution levels.
 // Services within the same level have no dependencies on each other
-// and can be started concurrently.
 func dependencyLevels(project *types.Project) ([][]string, error) {
 	order, err := dependencyOrder(project)
 	if err != nil {

@@ -15,17 +15,14 @@ import (
 
 const containerBinary = "container"
 
-// Driver wraps the Apple `container` CLI.
 type Driver struct {
 	logger *output.Logger
 }
 
-// New creates a new Driver.
 func New(logger *output.Logger) *Driver {
 	return &Driver{logger: logger}
 }
 
-// ContainerInfo holds information about a running container.
 type ContainerInfo struct {
 	Name    string
 	Service string
@@ -34,13 +31,11 @@ type ContainerInfo struct {
 	ID      string
 }
 
-// LogsOptions configures log streaming.
 type LogsOptions struct {
 	Follow bool
 	Tail   string
 }
 
-// RunContainer executes `container run` with the given arguments.
 func (d *Driver) RunContainer(ctx context.Context, args []string) error {
 	d.logger.Debugf("Running: %s %s", containerBinary, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, containerBinary, args...)
@@ -57,7 +52,6 @@ func (d *Driver) RunContainer(ctx context.Context, args []string) error {
 	return nil
 }
 
-// StopContainer stops a running container.
 func (d *Driver) StopContainer(ctx context.Context, name string) error {
 	d.logger.Debugf("Stopping container: %s", name)
 	cmd := exec.CommandContext(ctx, containerBinary, "stop", name)
@@ -71,7 +65,6 @@ func (d *Driver) StopContainer(ctx context.Context, name string) error {
 	return nil
 }
 
-// DeleteContainer removes a container.
 func (d *Driver) DeleteContainer(ctx context.Context, name string) error {
 	d.logger.Debugf("Deleting container: %s", name)
 	cmd := exec.CommandContext(ctx, containerBinary, "delete", name)
@@ -85,7 +78,6 @@ func (d *Driver) DeleteContainer(ctx context.Context, name string) error {
 	return nil
 }
 
-// ForceDeleteContainer force-removes a container even if it's running.
 func (d *Driver) ForceDeleteContainer(ctx context.Context, name string) error {
 	d.logger.Debugf("Force deleting container: %s", name)
 	cmd := exec.CommandContext(ctx, containerBinary, "delete", "--force", name)
@@ -99,7 +91,6 @@ func (d *Driver) ForceDeleteContainer(ctx context.Context, name string) error {
 	return nil
 }
 
-// CreateNetwork creates a network.
 func (d *Driver) CreateNetwork(ctx context.Context, name string) error {
 	d.logger.Infof("Creating network %s", name)
 	cmd := exec.CommandContext(ctx, containerBinary, "network", "create", name)
@@ -118,7 +109,6 @@ func (d *Driver) CreateNetwork(ctx context.Context, name string) error {
 	return nil
 }
 
-// DeleteNetwork removes a network.
 func (d *Driver) DeleteNetwork(ctx context.Context, name string) error {
 	d.logger.Infof("Removing network %s", name)
 	cmd := exec.CommandContext(ctx, containerBinary, "network", "delete", name)
@@ -135,7 +125,6 @@ func (d *Driver) DeleteNetwork(ctx context.Context, name string) error {
 	return nil
 }
 
-// CreateVolume creates a named volume.
 func (d *Driver) CreateVolume(ctx context.Context, name string) error {
 	d.logger.Infof("Creating volume %s", name)
 	cmd := exec.CommandContext(ctx, containerBinary, "volume", "create", name)
@@ -153,7 +142,6 @@ func (d *Driver) CreateVolume(ctx context.Context, name string) error {
 	return nil
 }
 
-// DeleteVolume removes a named volume.
 func (d *Driver) DeleteVolume(ctx context.Context, name string) error {
 	d.logger.Infof("Removing volume %s", name)
 	cmd := exec.CommandContext(ctx, containerBinary, "volume", "delete", name)
@@ -170,7 +158,6 @@ func (d *Driver) DeleteVolume(ctx context.Context, name string) error {
 	return nil
 }
 
-// ListContainers lists containers for a project by label.
 func (d *Driver) ListContainers(ctx context.Context, projectName string) ([]ContainerInfo, error) {
 	cmd := exec.CommandContext(ctx, containerBinary, "list", "--format", "json")
 
@@ -221,7 +208,6 @@ func (d *Driver) ListContainers(ctx context.Context, projectName string) ([]Cont
 	return containers, nil
 }
 
-// Logs streams logs from containers.
 func (d *Driver) Logs(ctx context.Context, projectName string, services []string, opts LogsOptions) error {
 	for _, service := range services {
 		containerName := fmt.Sprintf("%s-%s-1", projectName, service)
@@ -244,7 +230,6 @@ func (d *Driver) Logs(ctx context.Context, projectName string, services []string
 	return nil
 }
 
-// BuildOptions configures image build operations.
 type BuildOptions struct {
 	Dockerfile string
 	Args       map[string]*string
@@ -253,12 +238,10 @@ type BuildOptions struct {
 	NoCache    bool
 }
 
-// BuildImage builds an image from a Dockerfile context.
 func (d *Driver) BuildImage(ctx context.Context, contextPath string, dockerfile string, tag string) error {
 	return d.BuildImageWithOptions(ctx, contextPath, tag, BuildOptions{Dockerfile: dockerfile})
 }
 
-// BuildImageWithOptions builds an image with extended options.
 func (d *Driver) BuildImageWithOptions(ctx context.Context, contextPath string, tag string, opts BuildOptions) error {
 	args := []string{"image", "build", "-t", tag}
 	if opts.Dockerfile != "" {
@@ -290,14 +273,12 @@ func (d *Driver) BuildImageWithOptions(ctx context.Context, contextPath string, 
 	return cmd.Run()
 }
 
-// ExecOptions configures exec operations.
 type ExecOptions struct {
 	Detach  bool
 	User    string
 	Workdir string
 }
 
-// ExecContainer executes a command in a running container.
 func (d *Driver) ExecContainer(ctx context.Context, containerName string, command []string, opts ExecOptions) error {
 	args := []string{"exec"}
 
@@ -324,11 +305,9 @@ func (d *Driver) ExecContainer(ctx context.Context, containerName string, comman
 }
 
 func extractServiceFromName(containerName, projectName string) string {
-	// Container name format: project-service-replica
 	trimmed := strings.TrimPrefix(containerName, projectName+"-")
 	parts := strings.Split(trimmed, "-")
 	if len(parts) >= 2 {
-		// Rejoin all parts except the last (replica number)
 		return strings.Join(parts[:len(parts)-1], "-")
 	}
 	return trimmed
@@ -376,7 +355,6 @@ func intFromJSON(v any) int {
 	return 0
 }
 
-// KillContainer sends a signal to a container.
 func (d *Driver) KillContainer(ctx context.Context, name string, signal string) error {
 	args := []string{"kill"}
 	if signal != "" {
@@ -396,7 +374,6 @@ func (d *Driver) KillContainer(ctx context.Context, name string, signal string) 
 	return nil
 }
 
-// RegistryLogin logs in to a container registry.
 func (d *Driver) RegistryLogin(ctx context.Context, server, username, secret string) error {
 	args := []string{"registry", "login"}
 	if username != "" {
@@ -417,7 +394,6 @@ func (d *Driver) RegistryLogin(ctx context.Context, server, username, secret str
 	return nil
 }
 
-// IsRegistryLoggedIn checks if Apple Container already has credentials for a registry.
 func (d *Driver) IsRegistryLoggedIn(ctx context.Context, server string) bool {
 	cmd := exec.CommandContext(ctx, containerBinary, "registry", "list")
 	out, err := cmd.Output()
@@ -427,7 +403,6 @@ func (d *Driver) IsRegistryLoggedIn(ctx context.Context, server string) bool {
 	return strings.Contains(string(out), server)
 }
 
-// PullImage pulls an image from a registry.
 func (d *Driver) PullImage(ctx context.Context, image string, platform string) error {
 	args := []string{"image", "pull"}
 	if platform != "" {
@@ -443,7 +418,6 @@ func (d *Driver) PullImage(ctx context.Context, image string, platform string) e
 	return cmd.Run()
 }
 
-// PushImage pushes an image to a registry.
 func (d *Driver) PushImage(ctx context.Context, image string) error {
 	d.logger.Infof("Pushing %s", image)
 	cmd := exec.CommandContext(ctx, containerBinary, "image", "push", image)
@@ -453,7 +427,6 @@ func (d *Driver) PushImage(ctx context.Context, image string) error {
 	return cmd.Run()
 }
 
-// InspectContainer returns raw JSON inspect output for a container.
 func (d *Driver) InspectContainer(ctx context.Context, name string) (map[string]any, error) {
 	cmd := exec.CommandContext(ctx, containerBinary, "inspect", name)
 
@@ -481,7 +454,6 @@ func (d *Driver) InspectContainer(ctx context.Context, name string) (map[string]
 	return arr[0], nil
 }
 
-// GetContainerIP returns the IPv4 address of a container (without CIDR mask).
 func (d *Driver) GetContainerIP(ctx context.Context, name string) (string, error) {
 	info, err := d.InspectContainer(ctx, name)
 	if err != nil {
@@ -533,7 +505,6 @@ func (d *Driver) GetContainerGateway(ctx context.Context, name string) (string, 
 	return gw, nil
 }
 
-// ExecSimple runs a command in a container and returns stdout output.
 func (d *Driver) ExecSimple(ctx context.Context, containerName string, command []string) (string, error) {
 	args := []string{"exec", containerName}
 	args = append(args, command...)
@@ -549,7 +520,6 @@ func (d *Driver) ExecSimple(ctx context.Context, containerName string, command [
 	return stdout.String(), nil
 }
 
-// StatsContainer shows resource usage stats for a container.
 func (d *Driver) StatsContainer(ctx context.Context, name string) error {
 	cmd := exec.CommandContext(ctx, containerBinary, "stats", name)
 	cmd.Stdout = d.logger.Stdout()
@@ -558,7 +528,6 @@ func (d *Driver) StatsContainer(ctx context.Context, name string) error {
 	return cmd.Run()
 }
 
-// CopyToContainer copies files to a container.
 func (d *Driver) CopyToContainer(ctx context.Context, containerName, srcPath, dstPath string) error {
 	// Format: container cp SRC CONTAINER:DST
 	target := fmt.Sprintf("%s:%s", containerName, dstPath)
@@ -571,7 +540,6 @@ func (d *Driver) CopyToContainer(ctx context.Context, containerName, srcPath, ds
 	return cmd.Run()
 }
 
-// CopyFromContainer copies files from a container.
 func (d *Driver) CopyFromContainer(ctx context.Context, containerName, srcPath, dstPath string) error {
 	source := fmt.Sprintf("%s:%s", containerName, srcPath)
 	d.logger.Debugf("Copy: %s -> %s", source, dstPath)
@@ -583,7 +551,6 @@ func (d *Driver) CopyFromContainer(ctx context.Context, containerName, srcPath, 
 	return cmd.Run()
 }
 
-// TopContainer shows running processes in a container.
 func (d *Driver) TopContainer(ctx context.Context, name string) error {
 	cmd := exec.CommandContext(ctx, containerBinary, "exec", name, "ps", "aux")
 	cmd.Stdout = d.logger.Stdout()
@@ -592,7 +559,6 @@ func (d *Driver) TopContainer(ctx context.Context, name string) error {
 	return cmd.Run()
 }
 
-// ImageList lists images matching a filter.
 func (d *Driver) ImageList(ctx context.Context) ([]map[string]any, error) {
 	cmd := exec.CommandContext(ctx, containerBinary, "image", "list", "--format", "json")
 
@@ -622,7 +588,6 @@ func (d *Driver) ImageList(ctx context.Context) ([]map[string]any, error) {
 	return images, nil
 }
 
-// StartContainer starts a stopped container.
 func (d *Driver) StartContainer(ctx context.Context, name string) error {
 	d.logger.Debugf("Starting container: %s", name)
 	cmd := exec.CommandContext(ctx, containerBinary, "start", name)
@@ -636,8 +601,6 @@ func (d *Driver) StartContainer(ctx context.Context, name string) error {
 	return nil
 }
 
-// RunContainer executes `container run` with the given arguments and
-// optionally connects stdin/stdout for interactive use.
 func (d *Driver) RunContainerInteractive(ctx context.Context, args []string) error {
 	d.logger.Debugf("Running (interactive): %s %s", containerBinary, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, containerBinary, args...)
@@ -648,7 +611,6 @@ func (d *Driver) RunContainerInteractive(ctx context.Context, args []string) err
 	return cmd.Run()
 }
 
-// AttachContainer connects stdin/stdout/stderr to a running container.
 func (d *Driver) AttachContainer(ctx context.Context, name string) error {
 	d.logger.Debugf("Attaching to container: %s", name)
 	cmd := exec.CommandContext(ctx, containerBinary, "exec", "-it", name, "/bin/sh")

@@ -1,5 +1,4 @@
 // Package orchestrator manages the lifecycle of a compose project, including dependency ordering,
-// service discovery, health checks, and restart policies.
 package orchestrator
 
 import (
@@ -8,7 +7,6 @@ import (
 	"github.com/compose-spec/compose-go/v2/types"
 )
 
-// checkPortConflicts validates that no two services (or replicas) claim the same host port.
 func checkPortConflicts(project *types.Project, scale map[string]int) error {
 	type portClaim struct {
 		service string
@@ -58,8 +56,6 @@ func checkPortConflicts(project *types.Project, scale map[string]int) error {
 	return nil
 }
 
-// replicaCount returns how many replicas to run for a service.
-// Priority: --scale flag > deploy.replicas > 1.
 func replicaCount(serviceName string, service types.ServiceConfig, scaleOverride map[string]int) int {
 	if n, ok := scaleOverride[serviceName]; ok {
 		return n

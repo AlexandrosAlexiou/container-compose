@@ -1,5 +1,4 @@
 // Package orchestrator manages the lifecycle of a compose project, including dependency ordering,
-// service discovery, health checks, and restart policies.
 package orchestrator
 
 import (
@@ -11,7 +10,6 @@ import (
 	"github.com/apple/container-compose/internal/driver"
 )
 
-// RestartPolicy defines how a container should be restarted.
 type RestartPolicy string
 
 const (
@@ -21,7 +19,6 @@ const (
 	RestartUnlessStopped RestartPolicy = "unless-stopped"
 )
 
-// restartMonitor watches containers and restarts them according to their policy.
 type restartMonitor struct {
 	driver *driver.Driver
 }
@@ -30,7 +27,6 @@ func newRestartMonitor(d *driver.Driver) *restartMonitor {
 	return &restartMonitor{driver: d}
 }
 
-// monitorAndRestart watches a container and restarts it if it exits, according to the policy.
 func (rm *restartMonitor) monitorAndRestart(ctx context.Context, projectName, serviceName string, policy RestartPolicy, runArgs []string) {
 	if policy == RestartNo || policy == "" {
 		return
@@ -62,7 +58,6 @@ func (rm *restartMonitor) monitorAndRestart(ctx context.Context, projectName, se
 				continue
 			}
 
-			// Container is not running — decide whether to restart
 			switch policy {
 			case RestartAlways, RestartUnlessStopped:
 				_ = rm.driver.DeleteContainer(ctx, containerName)
@@ -87,7 +82,6 @@ func (rm *restartMonitor) monitorAndRestart(ctx context.Context, projectName, se
 	}
 }
 
-// parseRestartPolicy converts a compose restart string to our RestartPolicy.
 func parseRestartPolicy(policy string) RestartPolicy {
 	switch policy {
 	case "always":
@@ -103,7 +97,6 @@ func parseRestartPolicy(policy string) RestartPolicy {
 	}
 }
 
-// formatRestartInfo returns a description of restart policy for logging.
 func formatRestartInfo(policy string) string {
 	if policy == "" || policy == "no" {
 		return ""

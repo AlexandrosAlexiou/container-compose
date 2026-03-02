@@ -11,25 +11,21 @@ import (
 	"strings"
 )
 
-// DockerConfig represents ~/.docker/config.json.
 type DockerConfig struct {
 	Auths      map[string]AuthEntry `json:"auths"`
 	CredsStore string               `json:"credsStore"`
 }
 
-// AuthEntry holds inline auth (rarely used when a credential helper is configured).
 type AuthEntry struct {
 	Auth string `json:"auth,omitempty"`
 }
 
-// Credential holds a username/password retrieved from a credential helper.
 type Credential struct {
 	ServerURL string `json:"ServerURL"`
 	Username  string `json:"Username"`
 	Secret    string `json:"Secret"`
 }
 
-// LoadDockerConfig reads and parses ~/.docker/config.json.
 func LoadDockerConfig() (*DockerConfig, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -49,7 +45,6 @@ func LoadDockerConfig() (*DockerConfig, error) {
 	return &config, nil
 }
 
-// GetCredential retrieves credentials for a registry using Docker's credential helper.
 // It reads ~/.docker/config.json to find the credsStore, then calls
 // docker-credential-<store> get to retrieve the actual credentials.
 func GetCredential(registry string) (*Credential, error) {
@@ -58,12 +53,10 @@ func GetCredential(registry string) (*Credential, error) {
 		return nil, err
 	}
 
-	// Check if the registry is listed in auths
 	if config.Auths == nil {
 		return nil, fmt.Errorf("no auths in Docker config")
 	}
 
-	// Normalize: try with and without https://
 	found := false
 	for server := range config.Auths {
 		if server == registry || server == "https://"+registry || server == "http://"+registry {
@@ -103,7 +96,6 @@ func getFromHelper(store, registry string) (*Credential, error) {
 	return &cred, nil
 }
 
-// RegistriesWithCredentials returns all registries that have stored Docker credentials.
 func RegistriesWithCredentials() []string {
 	config, err := LoadDockerConfig()
 	if err != nil {
@@ -111,7 +103,6 @@ func RegistriesWithCredentials() []string {
 	}
 	var registries []string
 	for server := range config.Auths {
-		// Strip protocol prefix if present
 		server = strings.TrimPrefix(server, "https://")
 		server = strings.TrimPrefix(server, "http://")
 		registries = append(registries, server)

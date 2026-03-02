@@ -28,7 +28,6 @@ func init() {
 	rootCmd.AddCommand(newBuildCmd())
 	rootCmd.AddCommand(newExecCmd())
 
-	// Lifecycle commands
 	rootCmd.AddCommand(newStartCmd())
 	rootCmd.AddCommand(newStopCmd())
 	rootCmd.AddCommand(newRestartCmd())
@@ -36,29 +35,23 @@ func init() {
 	rootCmd.AddCommand(newRmCmd())
 	rootCmd.AddCommand(newKillCmd())
 
-	// Image commands
 	rootCmd.AddCommand(newPullCmd())
 	rootCmd.AddCommand(newPushCmd())
 
-	// Run / Copy / Wait
 	rootCmd.AddCommand(newRunCmd())
 	rootCmd.AddCommand(newCpCmd())
 	rootCmd.AddCommand(newWaitCmd())
 
-	// Inspection commands
 	rootCmd.AddCommand(newTopCmd())
 	rootCmd.AddCommand(newPortCmd())
 	rootCmd.AddCommand(newImagesCmd())
 	rootCmd.AddCommand(newStatsCmd())
 
-	// Config / Version
 	rootCmd.AddCommand(newConfigCmd())
 	rootCmd.AddCommand(newVersionCmd())
 
-	// Interactive
 	rootCmd.AddCommand(newAttachCmd())
 
-	// Registry auth
 	rootCmd.AddCommand(newLoginCmd())
 	rootCmd.AddCommand(newLogoutCmd())
 }
@@ -67,7 +60,6 @@ func Execute() error {
 	return rootCmd.Execute()
 }
 
-// SetVersion sets the version string displayed by the version command.
 func SetVersion(v string) {
 	rootCmd.Version = v
 }

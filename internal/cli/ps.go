@@ -41,7 +41,6 @@ func newPsCmd() *cobra.Command {
 				return nil
 			}
 
-			// Print header
 			fmt.Fprintf(os.Stdout, "%-30s %-20s %-15s %s\n", "NAME", "SERVICE", "STATUS", "PORTS")
 			fmt.Fprintf(os.Stdout, "%-30s %-20s %-15s %s\n", "----", "-------", "------", "-----")
 

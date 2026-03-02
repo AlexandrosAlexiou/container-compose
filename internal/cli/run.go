@@ -49,7 +49,6 @@ func newRunCmd() *cobra.Command {
 
 			d := driver.New(logger)
 
-			// Build run args based on the service config but with a unique name
 			containerName := fmt.Sprintf("%s-%s-run-%d", project.Name, serviceName, os.Getpid())
 			runArgs := []string{"run", "--name", containerName}
 
@@ -57,7 +56,6 @@ func newRunCmd() *cobra.Command {
 				runArgs = append(runArgs, "-d")
 			}
 
-			// Override user/workdir if specified
 			if user != "" {
 				runArgs = append(runArgs, "-u", user)
 			} else if service.User != "" {
@@ -70,7 +68,6 @@ func newRunCmd() *cobra.Command {
 				runArgs = append(runArgs, "-w", service.WorkingDir)
 			}
 
-			// Environment from service + overrides
 			for k, v := range service.Environment {
 				if v != nil {
 					runArgs = append(runArgs, "-e", fmt.Sprintf("%s=%s", k, *v))
@@ -80,7 +77,6 @@ func newRunCmd() *cobra.Command {
 				runArgs = append(runArgs, "-e", e)
 			}
 
-			// Volumes from service
 			for _, vol := range service.Volumes {
 				source := vol.Source
 				if vol.Type == "volume" && source != "" {
@@ -93,7 +89,6 @@ func newRunCmd() *cobra.Command {
 				runArgs = append(runArgs, "-v", v)
 			}
 
-			// Network
 			if len(service.Networks) > 0 {
 				for network := range service.Networks {
 					runArgs = append(runArgs, "--network", converter.NetworkName(project.Name, network))
@@ -105,10 +100,8 @@ func newRunCmd() *cobra.Command {
 
 			runArgs = append(runArgs, "--hostname", serviceName)
 
-			// Image
 			runArgs = append(runArgs, service.Image)
 
-			// Command override
 			if len(args) > 1 {
 				runArgs = append(runArgs, args[1:]...)
 			} else if len(service.Command) > 0 {
@@ -117,7 +110,6 @@ func newRunCmd() *cobra.Command {
 
 			err = d.RunContainerInteractive(ctx, runArgs)
 
-			// Cleanup one-off container if --rm
 			if rm {
 				_ = d.StopContainer(context.Background(), containerName)
 				_ = d.DeleteContainer(context.Background(), containerName)
@@ -159,9 +151,7 @@ func newCpCmd() *cobra.Command {
 			src := args[0]
 			dst := args[1]
 
-			// Determine direction: SERVICE:PATH or PATH
 			if parts := strings.SplitN(src, ":", 2); len(parts) == 2 {
-				// Copy from container
 				svc := parts[0]
 				if _, ok := project.Services[svc]; !ok {
 					return fmt.Errorf("service %q not found", svc)
@@ -169,7 +159,6 @@ func newCpCmd() *cobra.Command {
 				containerName := converter.ContainerName(project.Name, svc, 1)
 				return d.CopyFromContainer(ctx, containerName, parts[1], dst)
 			} else if parts := strings.SplitN(dst, ":", 2); len(parts) == 2 {
-				// Copy to container
 				svc := parts[0]
 				if _, ok := project.Services[svc]; !ok {
 					return fmt.Errorf("service %q not found", svc)
@@ -203,7 +192,6 @@ func newWaitCmd() *cobra.Command {
 
 			d := driver.New(logger)
 
-			// Poll until a container exits
 			for {
 				for _, svc := range args {
 					containerName := converter.ContainerName(project.Name, svc, 1)
@@ -230,7 +218,6 @@ func newWaitCmd() *cobra.Command {
 				case <-ctx.Done():
 					return ctx.Err()
 				default:
-					// Brief sleep handled by list latency
 				}
 			}
 		},

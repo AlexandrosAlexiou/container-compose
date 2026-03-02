@@ -30,7 +30,6 @@ func projectOptionsFromCmd(cmd *cobra.Command) (converter.ProjectOptions, error)
 		opts.ProjectDir = cwd
 	}
 
-	// Default project name from directory name
 	if opts.ProjectName == "" {
 		opts.ProjectName = filepath.Base(opts.ProjectDir)
 	}

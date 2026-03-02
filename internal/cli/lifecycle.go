@@ -159,9 +159,7 @@ func newCreateCmd() *cobra.Command {
 					return fmt.Errorf("service %q not found", svc)
 				}
 
-				// Use create instead of run (no -d, no start)
 				runArgs := converter.ContainerRunArgs(project.Name, service, svc, 1)
-				// Replace "run" with "create" in the args
 				runArgs[0] = "create"
 				logger.Infof("Creating %s", svc)
 				if err := d.RunContainer(ctx, runArgs); err != nil {

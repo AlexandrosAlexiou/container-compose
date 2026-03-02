@@ -17,43 +17,35 @@ const (
 	colorGray   = "\033[90m"
 )
 
-// Logger provides formatted output for compose operations.
 type Logger struct {
 	stdout io.Writer
 	stderr io.Writer
 }
 
-// NewLogger creates a new Logger.
 func NewLogger(stdout, stderr io.Writer) *Logger {
 	return &Logger{stdout: stdout, stderr: stderr}
 }
 
-// Stdout returns the stdout writer.
 func (l *Logger) Stdout() io.Writer {
 	return l.stdout
 }
 
-// Stderr returns the stderr writer.
 func (l *Logger) Stderr() io.Writer {
 	return l.stderr
 }
 
-// Infof prints an informational message.
 func (l *Logger) Infof(format string, args ...interface{}) {
 	fmt.Fprintf(l.stderr, colorCyan+"[+] "+colorReset+format+"\n", args...)
 }
 
-// Successf prints a success message.
 func (l *Logger) Successf(format string, args ...interface{}) {
 	fmt.Fprintf(l.stderr, colorGreen+" ✔ "+colorReset+format+"\n", args...)
 }
 
-// Warnf prints a warning message.
 func (l *Logger) Warnf(format string, args ...interface{}) {
 	fmt.Fprintf(l.stderr, colorYellow+"[!] "+colorReset+format+"\n", args...)
 }
 
-// Errorf prints an error message.
 func (l *Logger) Errorf(format string, args ...interface{}) {
 	fmt.Fprintf(l.stderr, colorRed+"[✗] "+colorReset+format+"\n", args...)
 }
