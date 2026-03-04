@@ -584,6 +584,19 @@ func (d *Driver) TopContainer(ctx context.Context, name string) error {
 	return cmd.Run()
 }
 
+func (d *Driver) DeleteImage(ctx context.Context, image string) error {
+	d.logger.Debugf("Deleting image: %s", image)
+	cmd := exec.CommandContext(ctx, containerBinary, "image", "delete", image)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("image delete %s failed: %w\n%s", image, err, stderr.String())
+	}
+	return nil
+}
+
 func (d *Driver) ImageList(ctx context.Context) ([]map[string]any, error) {
 	cmd := exec.CommandContext(ctx, containerBinary, "image", "list", "--format", "json")
 

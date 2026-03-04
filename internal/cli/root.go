@@ -37,6 +37,7 @@ func init() {
 
 	rootCmd.AddCommand(newPullCmd())
 	rootCmd.AddCommand(newPushCmd())
+	rootCmd.AddCommand(newRmiCmd())
 
 	rootCmd.AddCommand(newRunCmd())
 	rootCmd.AddCommand(newCpCmd())

@@ -138,6 +138,52 @@ func newImagesCmd() *cobra.Command {
 	}
 }
 
+func newRmiCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "rmi [SERVICE...]",
+		Short: "Remove images used by services",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+			logger := output.NewLogger(os.Stdout, os.Stderr)
+
+			projectOpts, err := projectOptionsFromCmd(cmd)
+			if err != nil {
+				return err
+			}
+			project, err := converter.LoadProject(projectOpts)
+			if err != nil {
+				return fmt.Errorf("loading compose file: %w", err)
+			}
+
+			d := driver.New(logger)
+			services := args
+			if len(services) == 0 {
+				for name := range project.Services {
+					services = append(services, name)
+				}
+			}
+
+			for _, svc := range services {
+				service, ok := project.Services[svc]
+				if !ok {
+					return fmt.Errorf("service %q not found", svc)
+				}
+				image := service.Image
+				if image == "" {
+					image = fmt.Sprintf("%s-%s", project.Name, svc)
+				}
+				logger.Infof("Removing image %s", image)
+				if err := d.DeleteImage(ctx, image); err != nil {
+					logger.Warnf("Failed to remove image for %s: %v", svc, err)
+				} else {
+					logger.Successf("Removed %s", image)
+				}
+			}
+			return nil
+		},
+	}
+}
+
 func newStatsCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stats [SERVICE...]",
