@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -21,24 +22,32 @@ before using images from those registries in your compose files.
 
 Examples:
   container-compose login myregistry.azurecr.io
-  container-compose login --username user --password pass myregistry.azurecr.io`,
+  container-compose login --username user --password pass myregistry.azurecr.io
+  echo "mytoken" | container-compose login --username user --password-stdin myregistry.azurecr.io`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			registry := args[0]
 			username, _ := cmd.Flags().GetString("username")
 			password, _ := cmd.Flags().GetString("password")
+			passwordStdin, _ := cmd.Flags().GetBool("password-stdin")
 
 			cmdArgs := []string{"registry", "login"}
 			if username != "" {
 				cmdArgs = append(cmdArgs, "--username", username)
 			}
-			if password != "" {
-				cmdArgs = append(cmdArgs, "--password", password)
+
+			// Apple Container only supports --password-stdin
+			if password != "" || passwordStdin {
+				cmdArgs = append(cmdArgs, "--password-stdin")
 			}
 			cmdArgs = append(cmdArgs, registry)
 
 			c := exec.Command("container", cmdArgs...)
-			c.Stdin = os.Stdin
+			if password != "" {
+				c.Stdin = strings.NewReader(password)
+			} else {
+				c.Stdin = os.Stdin
+			}
 			c.Stdout = os.Stdout
 			c.Stderr = os.Stderr
 
@@ -53,6 +62,7 @@ Examples:
 
 	cmd.Flags().StringP("username", "u", "", "Registry username")
 	cmd.Flags().String("password", "", "Registry password")
+	cmd.Flags().Bool("password-stdin", false, "Read password from stdin")
 
 	return cmd
 }

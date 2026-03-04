@@ -40,15 +40,15 @@ func (d *Driver) RunContainer(ctx context.Context, args []string) error {
 	d.logger.Debugf("Running: %s %s", containerBinary, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, containerBinary, args...)
 
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = d.logger.Stderr()
 
-	out, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("container run failed: %w\n%s", err, stderr.String())
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("container run failed: %w", err)
 	}
 
-	d.logger.Debugf("Container started: %s", strings.TrimSpace(string(out)))
+	d.logger.Debugf("Container started: %s", strings.TrimSpace(stdout.String()))
 	return nil
 }
 
@@ -117,10 +117,11 @@ func (d *Driver) DeleteNetwork(ctx context.Context, name string) error {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		if strings.Contains(stderr.String(), "not found") {
+		errMsg := stderr.String()
+		if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "failed to delete") {
 			return nil
 		}
-		return fmt.Errorf("network delete %s failed: %w\n%s", name, err, stderr.String())
+		return fmt.Errorf("network delete %s failed: %w\n%s", name, err, errMsg)
 	}
 	return nil
 }
@@ -158,7 +159,7 @@ func (d *Driver) DeleteVolume(ctx context.Context, name string) error {
 	return nil
 }
 
-func (d *Driver) ListContainers(ctx context.Context, projectName string) ([]ContainerInfo, error) {
+func (d *Driver) ListContainers(ctx context.Context, projectName string, customNames ...map[string]string) ([]ContainerInfo, error) {
 	cmd := exec.CommandContext(ctx, containerBinary, "list", "--format", "json")
 
 	var stderr bytes.Buffer
@@ -178,6 +179,14 @@ func (d *Driver) ListContainers(ctx context.Context, projectName string) ([]Cont
 		return nil, fmt.Errorf("parsing container list: %w", err)
 	}
 
+	// Build reverse lookup: custom container name -> service name
+	nameToService := make(map[string]string)
+	if len(customNames) > 0 {
+		for svc, cn := range customNames[0] {
+			nameToService[cn] = svc
+		}
+	}
+
 	var containers []ContainerInfo
 	for _, raw := range rawContainers {
 		// Apple Container JSON: name is at configuration.id, status at top level
@@ -195,10 +204,26 @@ func (d *Driver) ListContainers(ctx context.Context, projectName string) ([]Cont
 		}
 		status, _ = raw["status"].(string)
 
-		if name != "" && strings.HasPrefix(name, projectName+"-") {
+		if name == "" {
+			continue
+		}
+
+		// Match by project prefix (generated names like "local-postgres-1")
+		if strings.HasPrefix(name, projectName+"-") {
 			containers = append(containers, ContainerInfo{
 				Name:    name,
 				Service: extractServiceFromName(name, projectName),
+				Status:  status,
+				Ports:   ports,
+			})
+			continue
+		}
+
+		// Match by explicit container_name from compose file
+		if svc, ok := nameToService[name]; ok {
+			containers = append(containers, ContainerInfo{
+				Name:    name,
+				Service: svc,
 				Status:  status,
 				Ports:   ports,
 			})

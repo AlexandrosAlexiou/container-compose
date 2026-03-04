@@ -31,7 +31,16 @@ func newPsCmd() *cobra.Command {
 			}
 
 			d := driver.New(logger)
-			containers, err := d.ListContainers(ctx, project.Name)
+
+			// Build map of custom container names for services
+			customNames := make(map[string]string)
+			for name, svc := range project.Services {
+				if svc.ContainerName != "" {
+					customNames[name] = svc.ContainerName
+				}
+			}
+
+			containers, err := d.ListContainers(ctx, project.Name, customNames)
 			if err != nil {
 				return err
 			}

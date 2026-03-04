@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/apple/container-compose/internal/converter"
-	"github.com/apple/container-compose/internal/credentials"
 	"github.com/apple/container-compose/internal/driver"
 	"github.com/apple/container-compose/internal/output"
 	"github.com/compose-spec/compose-go/v2/types"
@@ -51,8 +50,6 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 	if err := o.createVolumes(ctx, project); err != nil {
 		return fmt.Errorf("creating volumes: %w", err)
 	}
-
-	o.syncDockerCredentials(ctx, project)
 
 	if opts.Build {
 		if err := o.buildImages(ctx, project); err != nil {
@@ -100,6 +97,9 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 					o.logger.Infof("Starting service %s%s%s", svcName, suffix, restartInfo)
 
 					containerName := converter.ContainerName(project.Name, svcName, i)
+					if svc.ContainerName != "" {
+						containerName = svc.ContainerName
+					}
 
 					_ = o.driver.StopContainer(ctx, containerName)
 					_ = o.driver.ForceDeleteContainer(ctx, containerName)
@@ -270,43 +270,6 @@ func (o *Orchestrator) findService(serviceName string) *types.ServiceConfig {
 		return &svc
 	}
 	return nil
-}
-
-func (o *Orchestrator) syncDockerCredentials(ctx context.Context, project *types.Project) {
-	registries := make(map[string]bool)
-	for _, service := range project.Services {
-		if service.Image == "" {
-			continue
-		}
-		registry := extractRegistry(service.Image)
-		if registry != "" {
-			registries[registry] = true
-		}
-	}
-
-	if len(registries) == 0 {
-		return
-	}
-
-	for registry := range registries {
-		if o.driver.IsRegistryLoggedIn(ctx, registry) {
-			o.logger.Debugf("Already logged in to %s", registry)
-			continue
-		}
-
-		cred, err := credentials.GetCredential(registry)
-		if err != nil {
-			o.logger.Warnf("No credentials for %s. If pulls fail, run: container-compose login %s", registry, registry)
-			continue
-		}
-
-		o.logger.Infof("Syncing Docker credentials for %s", registry)
-		if err := o.driver.RegistryLogin(ctx, registry, cred.Username, cred.Secret); err != nil {
-			o.logger.Warnf("Auto-login to %s failed: %v\nRun manually: container-compose login %s", registry, err, registry)
-		} else {
-			o.logger.Successf("Logged in to %s (from Docker credentials)", registry)
-		}
-	}
 }
 
 // Returns empty string for Docker Hub images (no explicit registry).
