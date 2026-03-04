@@ -60,8 +60,31 @@ func newUpCmd() *cobra.Command {
 			}
 
 			if !detach {
-				logger.Infof("All services started. Press Ctrl+C to stop.")
-				<-ctx.Done()
+				logger.Infof("Attaching to logs (press Ctrl+C to stop)")
+
+				// Build service name → container name map
+				serviceContainers := make(map[string]string)
+				for name, svc := range project.Services {
+					if svc.ContainerName != "" {
+						serviceContainers[name] = svc.ContainerName
+					} else {
+						serviceContainers[name] = converter.ContainerName(project.Name, name, 1)
+					}
+				}
+
+				// Follow logs from all services in the background
+				logsDone := make(chan struct{})
+				go func() {
+					d.FollowLogs(ctx, serviceContainers, os.Stdout)
+					close(logsDone)
+				}()
+
+				// Wait for Ctrl+C or all log streams to end
+				select {
+				case <-ctx.Done():
+				case <-logsDone:
+				}
+
 				logger.Infof("\nGracefully stopping...")
 				shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer shutdownCancel()

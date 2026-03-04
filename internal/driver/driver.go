@@ -2,13 +2,16 @@
 package driver
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/apple/container-compose/internal/output"
@@ -297,6 +300,80 @@ func (d *Driver) Logs(ctx context.Context, projectName string, services []string
 		}
 	}
 	return nil
+}
+
+// ANSI color codes for service log prefixes.
+var serviceColors = []string{
+	"\033[32m", // green
+	"\033[33m", // yellow
+	"\033[34m", // blue
+	"\033[35m", // magenta
+	"\033[36m", // cyan
+	"\033[91m", // bright red
+	"\033[92m", // bright green
+	"\033[93m", // bright yellow
+	"\033[94m", // bright blue
+	"\033[95m", // bright magenta
+}
+
+const colorReset = "\033[0m"
+
+// FollowLogs streams logs from multiple containers concurrently, prefixing each
+// line with a color-coded service name, similar to `docker compose up`.
+// serviceContainers maps service display names to actual container names.
+// It blocks until ctx is cancelled.
+func (d *Driver) FollowLogs(ctx context.Context, serviceContainers map[string]string, w io.Writer) {
+	// Compute max service name length for aligned output
+	maxLen := 0
+	for s := range serviceContainers {
+		if len(s) > maxLen {
+			maxLen = len(s)
+		}
+	}
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	i := 0
+	for service, containerName := range serviceContainers {
+		color := serviceColors[i%len(serviceColors)]
+		prefix := fmt.Sprintf("%s%-*s |%s ", color, maxLen, service, colorReset)
+		i++
+
+		wg.Add(1)
+		go func(container, pfx string) {
+			defer wg.Done()
+			d.streamLogs(ctx, container, pfx, w, &mu)
+		}(containerName, prefix)
+	}
+
+	wg.Wait()
+}
+
+func (d *Driver) streamLogs(ctx context.Context, containerName, prefix string, w io.Writer, mu *sync.Mutex) {
+	cmd := exec.CommandContext(ctx, containerBinary, "logs", "-f", containerName)
+
+	// Merge stdout and stderr into a single reader so we capture all container output
+	pr, pw := io.Pipe()
+	cmd.Stdout = pw
+	cmd.Stderr = pw
+
+	if err := cmd.Start(); err != nil {
+		d.logger.Warnf("Failed to start log follow for %s: %v", containerName, err)
+		return
+	}
+
+	go func() {
+		_ = cmd.Wait()
+		pw.Close()
+	}()
+
+	scanner := bufio.NewScanner(pr)
+	for scanner.Scan() {
+		mu.Lock()
+		fmt.Fprintf(w, "%s%s\n", prefix, scanner.Text())
+		mu.Unlock()
+	}
 }
 
 type BuildOptions struct {
