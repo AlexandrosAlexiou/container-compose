@@ -50,6 +50,7 @@ func init() {
 
 	rootCmd.AddCommand(newConfigCmd())
 	rootCmd.AddCommand(newVersionCmd())
+	rootCmd.AddCommand(newNetworkCmd())
 
 	rootCmd.AddCommand(newAttachCmd())
 

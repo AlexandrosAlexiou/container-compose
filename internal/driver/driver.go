@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/apple/container-compose/internal/output"
 )
@@ -93,20 +94,29 @@ func (d *Driver) ForceDeleteContainer(ctx context.Context, name string) error {
 
 func (d *Driver) CreateNetwork(ctx context.Context, name string) error {
 	d.logger.Infof("Creating network %s", name)
-	cmd := exec.CommandContext(ctx, containerBinary, "network", "create", name)
 
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	for attempt := 0; attempt < 5; attempt++ {
+		cmd := exec.CommandContext(ctx, containerBinary, "network", "create", name)
 
-	if err := cmd.Run(); err != nil {
-		// Ignore if already exists
-		if strings.Contains(stderr.String(), "already exists") {
-			d.logger.Debugf("Network %s already exists", name)
-			return nil
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+
+		if err := cmd.Run(); err != nil {
+			errMsg := stderr.String()
+			if strings.Contains(errMsg, "already exists") {
+				d.logger.Debugf("Network %s already exists", name)
+				return nil
+			}
+			if strings.Contains(errMsg, "pending operation") {
+				d.logger.Debugf("Network %s has pending operation, waiting...", name)
+				time.Sleep(time.Duration(attempt+1) * time.Second)
+				continue
+			}
+			return fmt.Errorf("network create %s failed: %w\n%s", name, err, errMsg)
 		}
-		return fmt.Errorf("network create %s failed: %w\n%s", name, err, stderr.String())
+		return nil
 	}
-	return nil
+	return fmt.Errorf("network create %s failed: pending operation did not resolve after retries", name)
 }
 
 func (d *Driver) DeleteNetwork(ctx context.Context, name string) error {
@@ -118,12 +128,46 @@ func (d *Driver) DeleteNetwork(ctx context.Context, name string) error {
 
 	if err := cmd.Run(); err != nil {
 		errMsg := stderr.String()
-		if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "failed to delete") {
+		if strings.Contains(errMsg, "not found") {
 			return nil
 		}
 		return fmt.Errorf("network delete %s failed: %w\n%s", name, err, errMsg)
 	}
 	return nil
+}
+
+func (d *Driver) ListNetworks(ctx context.Context) ([]string, error) {
+	cmd := exec.CommandContext(ctx, containerBinary, "network", "list")
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("network list failed: %w\n%s", err, stderr.String())
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	var networks []string
+	for i, line := range lines {
+		// Skip the header row
+		if i == 0 && strings.Contains(line, "NETWORK") {
+			continue
+		}
+		// Extract first column (network name)
+		fields := strings.Fields(line)
+		if len(fields) > 0 {
+			networks = append(networks, fields[0])
+		}
+	}
+	return networks, nil
+}
+
+func (d *Driver) ListNetworksRaw(ctx context.Context) error {
+	cmd := exec.CommandContext(ctx, containerBinary, "network", "list")
+	cmd.Stdout = d.logger.Stdout()
+	cmd.Stderr = d.logger.Stderr()
+	return cmd.Run()
 }
 
 func (d *Driver) CreateVolume(ctx context.Context, name string) error {
@@ -436,20 +480,28 @@ func (d *Driver) PullImage(ctx context.Context, image string, platform string) e
 	args = append(args, image)
 
 	d.logger.Infof("Pulling %s", image)
-	cmd := exec.CommandContext(ctx, containerBinary, args...)
-	cmd.Stdout = d.logger.Stdout()
-	cmd.Stderr = d.logger.Stderr()
 
-	return cmd.Run()
+	pw := output.NewProgressWriter(d.logger.Stderr())
+	cmd := exec.CommandContext(ctx, containerBinary, args...)
+	cmd.Stdout = pw
+	cmd.Stderr = pw
+
+	err := cmd.Run()
+	pw.Finish()
+	return err
 }
 
 func (d *Driver) PushImage(ctx context.Context, image string) error {
 	d.logger.Infof("Pushing %s", image)
-	cmd := exec.CommandContext(ctx, containerBinary, "image", "push", image)
-	cmd.Stdout = d.logger.Stdout()
-	cmd.Stderr = d.logger.Stderr()
 
-	return cmd.Run()
+	pw := output.NewProgressWriter(d.logger.Stderr())
+	cmd := exec.CommandContext(ctx, containerBinary, "image", "push", image)
+	cmd.Stdout = pw
+	cmd.Stderr = pw
+
+	err := cmd.Run()
+	pw.Finish()
+	return err
 }
 
 func (d *Driver) InspectContainer(ctx context.Context, name string) (map[string]any, error) {
