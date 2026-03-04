@@ -97,12 +97,14 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 					o.logger.Infof("Starting service %s%s%s", svcName, suffix, restartInfo)
 
 					containerName := converter.ContainerName(project.Name, svcName, i)
-					if svc.ContainerName != "" {
-						containerName = svc.ContainerName
-					}
 
+					// Clean up any existing container (try both generated and custom names)
 					_ = o.driver.StopContainer(ctx, containerName)
 					_ = o.driver.ForceDeleteContainer(ctx, containerName)
+					if svc.ContainerName != "" && svc.ContainerName != containerName {
+						_ = o.driver.StopContainer(ctx, svc.ContainerName)
+						_ = o.driver.ForceDeleteContainer(ctx, svc.ContainerName)
+					}
 
 					args := converter.ContainerRunArgsWithProject(project.Name, svc, svcName, i, project)
 					if err := o.driver.RunContainer(ctx, args); err != nil {
@@ -150,13 +152,21 @@ func (o *Orchestrator) Down(ctx context.Context, project *types.Project, opts Do
 		return fmt.Errorf("resolving dependencies: %w", err)
 	}
 
-	for i := len(order) - 1; i >= 0; i-- {
+	// Build custom name lookup for ListContainers
+		customNames := make(map[string]string)
+		for name, svc := range project.Services {
+			if svc.ContainerName != "" {
+				customNames[name] = svc.ContainerName
+			}
+		}
+
+		for i := len(order) - 1; i >= 0; i-- {
 		serviceName := order[i]
 		service := project.Services[serviceName]
 
 		o.logger.Infof("Stopping service %s", serviceName)
 
-		containers, _ := o.driver.ListContainers(ctx, project.Name)
+		containers, _ := o.driver.ListContainers(ctx, project.Name, customNames)
 		stopped := false
 		for _, c := range containers {
 			if c.Service == serviceName {
