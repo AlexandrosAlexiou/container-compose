@@ -66,6 +66,10 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 	o.cancelMon = monCancel
 	rm := newRestartMonitor(o.driver)
 
+	failedServices := make(map[string]bool)
+	var failMu sync.Mutex
+	var allErrors []error
+
 	for _, level := range levels {
 		var wg sync.WaitGroup
 		errCh := make(chan error, len(level))
@@ -73,11 +77,28 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 		for _, serviceName := range level {
 			service := project.Services[serviceName]
 
+			// Skip services whose dependencies failed (safe: previous levels are complete)
+			depFailed := false
+			for dep := range service.DependsOn {
+				if failedServices[dep] {
+					depFailed = true
+					o.logger.Warnf("Skipping service %s: dependency %s failed to start", serviceName, dep)
+					failedServices[serviceName] = true
+					break
+				}
+			}
+			if depFailed {
+				continue
+			}
+
 			wg.Add(1)
 			go func(svcName string, svc types.ServiceConfig) {
 				defer wg.Done()
 
 				if err := o.waitForDependencies(ctx, project.Name, svc); err != nil {
+					failMu.Lock()
+					failedServices[svcName] = true
+					failMu.Unlock()
 					errCh <- fmt.Errorf("waiting for dependencies of %s: %w", svcName, err)
 					return
 				}
@@ -108,6 +129,9 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 
 					args := converter.ContainerRunArgsWithProject(project.Name, svc, svcName, i, project)
 					if err := o.driver.RunContainer(ctx, args); err != nil {
+						failMu.Lock()
+						failedServices[svcName] = true
+						failMu.Unlock()
 						errCh <- fmt.Errorf("starting service %s replica %d: %w", svcName, i, err)
 						return
 					}
@@ -126,9 +150,20 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 		close(errCh)
 
 		for err := range errCh {
-			monCancel()
-			return err
+			allErrors = append(allErrors, err)
 		}
+	}
+
+	if len(allErrors) > 0 {
+		monCancel()
+		if len(allErrors) == 1 {
+			return allErrors[0]
+		}
+		var msgs []string
+		for _, e := range allErrors {
+			msgs = append(msgs, e.Error())
+		}
+		return fmt.Errorf("multiple services failed:\n  %s", strings.Join(msgs, "\n  "))
 	}
 
 	// 6. Set up service discovery (/etc/hosts entries for service name resolution)
