@@ -239,6 +239,11 @@ func ContainerRunArgsWithProject(projectName string, service types.ServiceConfig
 
 	args = append(args, service.Image)
 
+	// Entrypoint args after the executable (e.g. "-c" "script...") go after the image
+	if len(service.Entrypoint) > 1 {
+		args = append(args, service.Entrypoint[1:]...)
+	}
+
 	if len(service.Command) > 0 {
 		args = append(args, service.Command...)
 	}

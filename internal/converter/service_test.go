@@ -64,6 +64,30 @@ func TestContainerRunArgsEntrypoint(t *testing.T) {
 	if strings.Contains(argsStr, "--entrypoint /bin/sh -c echo hello") {
 		t.Errorf("entrypoint should only be the executable, got: %s", argsStr)
 	}
+	// Entrypoint args should appear after the image
+	if !strings.Contains(argsStr, "myimage -c echo hello") {
+		t.Errorf("expected entrypoint args after image, got: %s", argsStr)
+	}
+}
+
+func TestContainerRunArgsEntrypointWithCommand(t *testing.T) {
+	service := types.ServiceConfig{
+		Image:      "postgres:14",
+		Entrypoint: types.ShellCommand{"bash", "-c", "docker-entrypoint.sh postgres & tail -f /dev/null"},
+		Command:    types.ShellCommand{"--some-flag"},
+	}
+
+	args := ContainerRunArgs("proj", service, "db", 1)
+	argsStr := strings.Join(args, " ")
+
+	// Executable via --entrypoint
+	if !strings.Contains(argsStr, "--entrypoint bash") {
+		t.Errorf("expected --entrypoint bash, got: %s", argsStr)
+	}
+	// Entrypoint args then command args after image
+	if !strings.Contains(argsStr, "postgres:14 -c docker-entrypoint.sh postgres & tail -f /dev/null --some-flag") {
+		t.Errorf("expected entrypoint args followed by command args after image, got: %s", argsStr)
+	}
 }
 
 func TestContainerRunArgsExplicitNetwork(t *testing.T) {
