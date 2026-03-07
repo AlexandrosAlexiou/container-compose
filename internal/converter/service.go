@@ -44,6 +44,11 @@ func ContainerRunArgsWithProject(projectName string, service types.ServiceConfig
 		args = append(args, "-p", portStr)
 	}
 
+	// Store expose ports as a label so ps can display them (Docker Compose compat)
+	if len(service.Expose) > 0 {
+		args = appendLabel(args, "com.docker.compose.expose", strings.Join(service.Expose, ","))
+	}
+
 	for _, vol := range service.Volumes {
 		// Anonymous volumes (no source) → tmpfs mount
 		if vol.Source == "" {

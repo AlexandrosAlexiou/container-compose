@@ -244,6 +244,17 @@ func (d *Driver) ListContainers(ctx context.Context, projectName string, customN
 		if config, ok := raw["configuration"].(map[string]any); ok {
 			name, _ = config["id"].(string)
 			ports = formatPublishedPorts(config)
+
+			// Append exposed-only ports from label (Docker Compose compat)
+			if exposed := getLabel(config, "com.docker.compose.expose"); exposed != "" {
+				exposedPorts := formatExposedPorts(exposed, ports)
+				if exposedPorts != "" {
+					if ports != "" {
+						ports += ", "
+					}
+					ports += exposedPorts
+				}
+			}
 		}
 		// Fallback: try "name" at top level
 		if name == "" {
@@ -529,6 +540,40 @@ func intFromJSON(v any) int {
 		return n
 	}
 	return 0
+}
+
+// getLabel extracts a label value from the Apple Container configuration JSON.
+func getLabel(config map[string]any, key string) string {
+	labels, ok := config["labels"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	val, _ := labels[key].(string)
+	return val
+}
+
+// formatExposedPorts returns exposed-only ports (not already published) as "port/proto".
+func formatExposedPorts(exposed, publishedPorts string) string {
+	var parts []string
+	for _, e := range strings.Split(exposed, ",") {
+		e = strings.TrimSpace(e)
+		if e == "" {
+			continue
+		}
+		// Parse port/proto; default to tcp
+		port := e
+		proto := "tcp"
+		if i := strings.Index(e, "/"); i >= 0 {
+			port = e[:i]
+			proto = e[i+1:]
+		}
+		// Skip if this port is already shown as a published port
+		if strings.Contains(publishedPorts, "->"+port+"/"+proto) {
+			continue
+		}
+		parts = append(parts, port+"/"+proto)
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (d *Driver) KillContainer(ctx context.Context, name string, signal string) error {
