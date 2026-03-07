@@ -351,29 +351,59 @@ func (d *Driver) FollowLogs(ctx context.Context, serviceContainers map[string]st
 }
 
 func (d *Driver) streamLogs(ctx context.Context, containerName, prefix string, w io.Writer, mu *sync.Mutex) {
-	cmd := exec.CommandContext(ctx, containerBinary, "logs", "-f", containerName)
+	for {
+		if ctx.Err() != nil {
+			return
+		}
 
-	// Merge stdout and stderr into a single reader so we capture all container output
-	pr, pw := io.Pipe()
-	cmd.Stdout = pw
-	cmd.Stderr = pw
+		cmd := exec.CommandContext(ctx, containerBinary, "logs", "-f", containerName)
 
-	if err := cmd.Start(); err != nil {
-		d.logger.Warnf("Failed to start log follow for %s: %v", containerName, err)
-		return
+		pr, pw := io.Pipe()
+		cmd.Stdout = pw
+		// Capture CLI errors separately so they don't appear as container output
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+
+		if err := cmd.Start(); err != nil {
+			if !d.IsContainerRunning(ctx, containerName) {
+				return
+			}
+			d.logger.Debugf("Retrying log follow for %s: %v", containerName, err)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		go func() {
+			_ = cmd.Wait()
+			pw.Close()
+		}()
+
+		scanner := bufio.NewScanner(pr)
+		for scanner.Scan() {
+			mu.Lock()
+			fmt.Fprintf(w, "%s%s\n", prefix, scanner.Text())
+			mu.Unlock()
+		}
+
+		// Log stream ended — only retry if the container is still alive
+		if ctx.Err() != nil || !d.IsContainerRunning(ctx, containerName) {
+			return
+		}
+		if errMsg := stderr.String(); errMsg != "" {
+			d.logger.Debugf("Log follow for %s failed: %s", containerName, strings.TrimSpace(errMsg))
+		}
+		stderr.Reset()
+		time.Sleep(2 * time.Second)
 	}
+}
 
-	go func() {
-		_ = cmd.Wait()
-		pw.Close()
-	}()
-
-	scanner := bufio.NewScanner(pr)
-	for scanner.Scan() {
-		mu.Lock()
-		fmt.Fprintf(w, "%s%s\n", prefix, scanner.Text())
-		mu.Unlock()
+func (d *Driver) IsContainerRunning(ctx context.Context, name string) bool {
+	info, err := d.InspectContainer(ctx, name)
+	if err != nil {
+		return false
 	}
+	status, _ := info["status"].(string)
+	return strings.EqualFold(status, "running")
 }
 
 type BuildOptions struct {

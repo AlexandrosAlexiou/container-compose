@@ -3,6 +3,7 @@ package orchestrator
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/compose-spec/compose-go/v2/types"
 )
@@ -47,7 +48,14 @@ func dependencyOrder(project *types.Project) ([]string, error) {
 		return nil
 	}
 
+	// Sort service names for deterministic ordering across runs.
+	sortedNames := make([]string, 0, len(allServices))
 	for name := range allServices {
+		sortedNames = append(sortedNames, name)
+	}
+	sort.Strings(sortedNames)
+
+	for _, name := range sortedNames {
 		if err := visit(name); err != nil {
 			return nil, err
 		}

@@ -72,17 +72,38 @@ func newUpCmd() *cobra.Command {
 					}
 				}
 
-				// Follow logs from all services in the background
-				logsDone := make(chan struct{})
+				// Follow logs in background (best-effort display, not a shutdown trigger)
+				go d.FollowLogs(ctx, serviceContainers, os.Stdout)
+
+				// Monitor container status: shut down when all containers have exited
+				allExited := make(chan struct{})
 				go func() {
-					d.FollowLogs(ctx, serviceContainers, os.Stdout)
-					close(logsDone)
+					ticker := time.NewTicker(3 * time.Second)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-ctx.Done():
+							return
+						case <-ticker.C:
+							running := false
+							for _, cn := range serviceContainers {
+								if d.IsContainerRunning(ctx, cn) {
+									running = true
+									break
+								}
+							}
+							if !running {
+								close(allExited)
+								return
+							}
+						}
+					}
 				}()
 
-				// Wait for Ctrl+C or all log streams to end
+				// Wait for Ctrl+C or all containers to actually exit
 				select {
 				case <-ctx.Done():
-				case <-logsDone:
+				case <-allExited:
 				}
 
 				logger.Infof("\nGracefully stopping...")

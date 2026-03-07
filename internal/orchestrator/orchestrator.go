@@ -188,20 +188,25 @@ func (o *Orchestrator) Down(ctx context.Context, project *types.Project, opts Do
 	}
 
 	// Build custom name lookup for ListContainers
-		customNames := make(map[string]string)
-		for name, svc := range project.Services {
-			if svc.ContainerName != "" {
-				customNames[name] = svc.ContainerName
-			}
+	customNames := make(map[string]string)
+	for name, svc := range project.Services {
+		if svc.ContainerName != "" {
+			customNames[name] = svc.ContainerName
 		}
+	}
 
-		for i := len(order) - 1; i >= 0; i-- {
+	// List containers once before the stop loop
+	containers, err := o.driver.ListContainers(ctx, project.Name, customNames)
+	if err != nil {
+		o.logger.Warnf("Failed to list containers: %v", err)
+	}
+
+	for i := len(order) - 1; i >= 0; i-- {
 		serviceName := order[i]
 		service := project.Services[serviceName]
 
 		o.logger.Infof("Stopping service %s", serviceName)
 
-		containers, _ := o.driver.ListContainers(ctx, project.Name, customNames)
 		stopped := false
 		for _, c := range containers {
 			if c.Service == serviceName {
@@ -248,7 +253,10 @@ func (o *Orchestrator) Down(ctx context.Context, project *types.Project, opts Do
 	}
 
 	if opts.RemoveOrphans {
-		containers, _ := o.driver.ListContainers(ctx, project.Name)
+		containers, err := o.driver.ListContainers(ctx, project.Name)
+		if err != nil {
+			o.logger.Warnf("Failed to list containers for orphan removal: %v", err)
+		}
 		for _, c := range containers {
 			if _, exists := project.Services[c.Service]; !exists {
 				o.logger.Infof("Removing orphan container %s", c.Name)
