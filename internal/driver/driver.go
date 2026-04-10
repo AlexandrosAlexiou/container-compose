@@ -41,18 +41,36 @@ type LogsOptions struct {
 }
 
 func (d *Driver) RunContainer(ctx context.Context, args []string) error {
+	return d.RunContainerWithWriter(ctx, args, nil)
+}
+
+// RunContainerWithWriter runs a container, directing subprocess output to the
+// given writer. If w is nil, stderr goes to the logger's stderr (raw).
+// When w is provided, both stdout and stderr are sent through it so that
+// image-pull progress is captured regardless of which stream the container
+// CLI uses.
+func (d *Driver) RunContainerWithWriter(ctx context.Context, args []string, w io.Writer) error {
 	d.logger.Debugf("Running: %s %s", containerBinary, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, containerBinary, args...)
 
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = d.logger.Stderr()
+	if w != nil {
+		cmd.Stdout = w
+		cmd.Stderr = w
+	} else {
+		var stdout bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = d.logger.Stderr()
+
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("container run failed: %w", err)
+		}
+		d.logger.Debugf("Container started: %s", strings.TrimSpace(stdout.String()))
+		return nil
+	}
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("container run failed: %w", err)
 	}
-
-	d.logger.Debugf("Container started: %s", strings.TrimSpace(stdout.String()))
 	return nil
 }
 
@@ -625,22 +643,41 @@ func (d *Driver) IsRegistryLoggedIn(ctx context.Context, server string) bool {
 }
 
 func (d *Driver) PullImage(ctx context.Context, image string, platform string) error {
+	return d.PullImageWithWriter(ctx, image, platform, nil)
+}
+
+// PullImageWithWriter pulls an image, directing subprocess output to the
+// given writer. If w is nil, a default single-line ProgressWriter is used.
+// When w is provided, the command is wrapped in a PTY (via script(1)) so
+// that the container CLI emits its rich ANSI progress output even though
+// stdout/stderr are pipes.
+func (d *Driver) PullImageWithWriter(ctx context.Context, image string, platform string, w io.Writer) error {
 	args := []string{"image", "pull"}
 	if platform != "" {
 		args = append(args, "--platform", platform)
 	}
 	args = append(args, image)
 
-	d.logger.Infof("Pulling %s", image)
+	if w == nil {
+		d.logger.Infof("Pulling %s", image)
+		pw := output.NewProgressWriter(d.logger.Stderr())
+		cmd := exec.CommandContext(ctx, containerBinary, args...)
+		cmd.Stdout = pw
+		cmd.Stderr = pw
+		err := cmd.Run()
+		pw.Finish()
+		return err
+	}
 
-	pw := output.NewProgressWriter(d.logger.Stderr())
-	cmd := exec.CommandContext(ctx, containerBinary, args...)
-	cmd.Stdout = pw
-	cmd.Stderr = pw
-
-	err := cmd.Run()
-	pw.Finish()
-	return err
+	// Wrap in script(1) to allocate a PTY. The container CLI detects
+	// non-TTY pipes and suppresses progress output; script forces TTY.
+	scriptArgs := []string{"-q", "/dev/null"}
+	scriptArgs = append(scriptArgs, containerBinary)
+	scriptArgs = append(scriptArgs, args...)
+	cmd := exec.CommandContext(ctx, "script", scriptArgs...)
+	cmd.Stdout = w
+	cmd.Stderr = w
+	return cmd.Run()
 }
 
 func (d *Driver) PushImage(ctx context.Context, image string) error {

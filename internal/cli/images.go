@@ -79,20 +79,39 @@ func newPullCmd() *cobra.Command {
 				}
 			}
 
+			// Build the service list for the compose progress display.
+			var pullList [][2]string
 			for _, svc := range services {
 				service, ok := project.Services[svc]
 				if !ok {
 					return fmt.Errorf("service %q not found", svc)
 				}
+				pullList = append(pullList, [2]string{svc, service.Image})
+			}
+
+			cp := output.NewComposeProgress(os.Stderr, pullList)
+
+			var firstErr error
+			for _, svc := range services {
+				service := project.Services[svc]
 				if service.Image == "" {
-					logger.Infof("Skipping %s (no image, build only)", svc)
+					cp.SetState(svc, output.StateSkipped, nil)
 					continue
 				}
-				if err := d.PullImage(ctx, service.Image, service.Platform); err != nil {
-					return fmt.Errorf("pulling image for %s: %w", svc, err)
+				cp.SetState(svc, output.StatePulling, nil)
+				w := cp.ServiceWriter(svc)
+				if err := d.PullImageWithWriter(ctx, service.Image, service.Platform, w); err != nil {
+					cp.SetState(svc, output.StateError, err)
+					if firstErr == nil {
+						firstErr = fmt.Errorf("pulling image for %s: %w", svc, err)
+					}
+				} else {
+					cp.SetState(svc, output.StateDone, nil)
 				}
 			}
-			return nil
+
+			cp.Finish()
+			return firstErr
 		},
 	}
 }

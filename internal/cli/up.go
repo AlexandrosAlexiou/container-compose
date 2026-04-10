@@ -52,9 +52,10 @@ func newUpCmd() *cobra.Command {
 			orch := orchestrator.New(d, logger)
 
 			if err := orch.Up(ctx, project, orchestrator.UpOptions{
-				Detach: detach,
-				Build:  build,
-				Scale:  scaleMap,
+				Detach:       detach,
+				Build:        build,
+				Scale:        scaleMap,
+				ShowProgress: true,
 			}); err != nil {
 				return err
 			}

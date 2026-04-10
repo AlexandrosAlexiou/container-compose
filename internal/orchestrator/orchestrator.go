@@ -22,9 +22,10 @@ type Orchestrator struct {
 }
 
 type UpOptions struct {
-	Detach bool
-	Build  bool
-	Scale  map[string]int // service name -> replica count
+	Detach       bool
+	Build        bool
+	Scale        map[string]int // service name -> replica count
+	ShowProgress bool           // show multi-line progress display for service startup
 }
 
 type DownOptions struct {
@@ -60,6 +61,16 @@ func (o *Orchestrator) Up(ctx context.Context, project *types.Project, opts UpOp
 	levels, err := dependencyLevels(project)
 	if err != nil {
 		return fmt.Errorf("resolving dependencies: %w", err)
+	}
+
+	// Pre-pull images with progress display AFTER all pre-work (networks,
+	// volumes, builds) so that log lines don't interleave with the progress
+	// block. The container CLI outputs rich progress (blobs, percentage,
+	// speed) only via `container image pull`, not via `container run -d`.
+	if opts.ShowProgress {
+		if err := o.pullImages(ctx, project); err != nil {
+			return err
+		}
 	}
 
 	monCtx, monCancel := context.WithCancel(context.Background())
@@ -419,6 +430,57 @@ func (o *Orchestrator) buildImages(ctx context.Context, project *types.Project) 
 		}
 	}
 	return nil
+}
+
+// pullImages pre-pulls all unique images referenced by services in the project,
+// displaying a multi-line progress block with per-service status. Services that
+// only use build (no image tag) are skipped. This uses `container image pull`
+// which emits rich ANSI progress (blobs, percentage, throughput) unlike
+// `container run -d` which suppresses pull progress in non-TTY mode.
+func (o *Orchestrator) pullImages(ctx context.Context, project *types.Project) error {
+	// Collect unique service→image pairs (skip build-only services).
+	var svcList [][2]string
+	for name, service := range project.Services {
+		if service.Image == "" {
+			continue
+		}
+		svcList = append(svcList, [2]string{name, service.Image})
+	}
+	if len(svcList) == 0 {
+		return nil
+	}
+
+	cp := output.NewComposeProgress(o.logger.Stderr(), svcList)
+
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		firstErr error
+	)
+
+	for _, entry := range svcList {
+		wg.Add(1)
+		go func(svcName, image string) {
+			defer wg.Done()
+			service := project.Services[svcName]
+			cp.SetState(svcName, output.StatePulling, nil)
+			w := cp.ServiceWriter(svcName)
+			if err := o.driver.PullImageWithWriter(ctx, image, service.Platform, w); err != nil {
+				cp.SetState(svcName, output.StateError, err)
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("pulling image for %s: %w", svcName, err)
+				}
+				mu.Unlock()
+			} else {
+				cp.SetState(svcName, output.StateDone, nil)
+			}
+		}(entry[0], entry[1])
+	}
+
+	wg.Wait()
+	cp.Finish()
+	return firstErr
 }
 
 // setupServiceDiscovery injects /etc/hosts entries into all containers so that

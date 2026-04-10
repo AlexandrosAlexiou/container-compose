@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+var ansiPattern = regexp.MustCompile(`\x1b\[[?]?[0-9;]*[a-zA-Z]`)
 
 // ProgressWriter captures raw subprocess output and renders a clean,
 // throttled single-line progress indicator to avoid terminal flickering.
@@ -75,9 +75,6 @@ func (pw *ProgressWriter) render() {
 	pw.dirty = false
 
 	line := pw.lastLine
-	if len(line) > 76 {
-		line = line[:73] + "..."
-	}
 
 	pad := ""
 	if diff := pw.prevLen - len(line); diff > 0 {
