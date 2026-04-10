@@ -40,7 +40,7 @@ func newKillCmd() *cobra.Command {
 			}
 
 			for _, svc := range services {
-				name := converter.ContainerName(project.Name, svc, 1)
+				name := converter.ResolveContainerName(project, svc, 1)
 				logger.Infof("Killing %s", svc)
 				if err := d.KillContainer(ctx, name, signal); err != nil {
 					logger.Warnf("Failed to kill %s: %v", svc, err)

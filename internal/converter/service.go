@@ -260,6 +260,16 @@ func ContainerName(projectName, serviceName string, replica int) string {
 	return fmt.Sprintf("%s-%s-%d", projectName, serviceName, replica)
 }
 
+// ResolveContainerName returns the actual container name for a service,
+// honoring the container_name field from the compose YAML if set,
+// otherwise falling back to the generated name.
+func ResolveContainerName(project *types.Project, serviceName string, replica int) string {
+	if svc, ok := project.Services[serviceName]; ok && svc.ContainerName != "" {
+		return svc.ContainerName
+	}
+	return ContainerName(project.Name, serviceName, replica)
+}
+
 func NetworkName(projectName, network string) string {
 	return fmt.Sprintf("%s_%s", projectName, network)
 }

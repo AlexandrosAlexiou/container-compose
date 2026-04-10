@@ -38,7 +38,7 @@ func newStartCmd() *cobra.Command {
 			}
 
 			for _, svc := range services {
-				name := converter.ContainerName(project.Name, svc, 1)
+				name := converter.ResolveContainerName(project, svc, 1)
 				logger.Infof("Starting %s", svc)
 				if err := d.StartContainer(ctx, name); err != nil {
 					logger.Warnf("Failed to start %s: %v", svc, err)
@@ -75,7 +75,7 @@ func newStopCmd() *cobra.Command {
 			}
 
 			for _, svc := range services {
-				name := converter.ContainerName(project.Name, svc, 1)
+				name := converter.ResolveContainerName(project, svc, 1)
 				logger.Infof("Stopping %s", svc)
 				if err := d.StopContainer(ctx, name); err != nil {
 					logger.Warnf("Failed to stop %s: %v", svc, err)
@@ -112,7 +112,7 @@ func newRestartCmd() *cobra.Command {
 			}
 
 			for _, svc := range services {
-				name := converter.ContainerName(project.Name, svc, 1)
+				name := converter.ResolveContainerName(project, svc, 1)
 				logger.Infof("Restarting %s", svc)
 				if err := d.StopContainer(ctx, name); err != nil {
 					logger.Warnf("Failed to stop %s: %v", svc, err)
@@ -200,7 +200,7 @@ func newRmCmd() *cobra.Command {
 			}
 
 			for _, svc := range services {
-				name := converter.ContainerName(project.Name, svc, 1)
+				name := converter.ResolveContainerName(project, svc, 1)
 				if force {
 					_ = d.StopContainer(ctx, name)
 				}

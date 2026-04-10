@@ -38,7 +38,7 @@ func newTopCmd() *cobra.Command {
 			}
 
 			for _, svc := range services {
-				containerName := converter.ContainerName(project.Name, svc, 1)
+				containerName := converter.ResolveContainerName(project, svc, 1)
 				fmt.Fprintf(os.Stdout, "\n%s\n", svc)
 				if err := d.TopContainer(ctx, containerName); err != nil {
 					logger.Warnf("Failed to get processes for %s: %v", svc, err)
@@ -210,7 +210,7 @@ func newStatsCmd() *cobra.Command {
 			}
 
 			for _, svc := range services {
-				containerName := converter.ContainerName(project.Name, svc, 1)
+				containerName := converter.ResolveContainerName(project, svc, 1)
 				if err := d.StatsContainer(ctx, containerName); err != nil {
 					logger.Warnf("Failed to get stats for %s: %v", svc, err)
 				}

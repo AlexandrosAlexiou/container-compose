@@ -40,7 +40,7 @@ func newAttachCmd() *cobra.Command {
 			}
 
 			d := driver.New(logger)
-			containerName := converter.ContainerName(project.Name, serviceName, 1)
+			containerName := converter.ResolveContainerName(project, serviceName, 1)
 			return d.AttachContainer(ctx, containerName)
 		},
 	}

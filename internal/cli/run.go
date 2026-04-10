@@ -124,6 +124,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&user, "user", "u", "", "Run as specified user")
 	cmd.Flags().StringVarP(&workdir, "workdir", "w", "", "Working directory inside the container")
 	cmd.Flags().StringSliceVarP(&envVars, "env", "e", nil, "Set environment variables")
+	cmd.Flags().SetInterspersed(false)
 
 	return cmd
 }
@@ -156,14 +157,14 @@ func newCpCmd() *cobra.Command {
 				if _, ok := project.Services[svc]; !ok {
 					return fmt.Errorf("service %q not found", svc)
 				}
-				containerName := converter.ContainerName(project.Name, svc, 1)
+				containerName := converter.ResolveContainerName(project, svc, 1)
 				return d.CopyFromContainer(ctx, containerName, parts[1], dst)
 			} else if parts := strings.SplitN(dst, ":", 2); len(parts) == 2 {
 				svc := parts[0]
 				if _, ok := project.Services[svc]; !ok {
 					return fmt.Errorf("service %q not found", svc)
 				}
-				containerName := converter.ContainerName(project.Name, svc, 1)
+				containerName := converter.ResolveContainerName(project, svc, 1)
 				return d.CopyToContainer(ctx, containerName, src, parts[1])
 			}
 
@@ -194,7 +195,7 @@ func newWaitCmd() *cobra.Command {
 
 			for {
 				for _, svc := range args {
-					containerName := converter.ContainerName(project.Name, svc, 1)
+					containerName := converter.ResolveContainerName(project, svc, 1)
 					containers, err := d.ListContainers(ctx, project.Name)
 					if err != nil {
 						continue

@@ -65,12 +65,8 @@ func newUpCmd() *cobra.Command {
 
 				// Build service name → container name map
 				serviceContainers := make(map[string]string)
-				for name, svc := range project.Services {
-					if svc.ContainerName != "" {
-						serviceContainers[name] = svc.ContainerName
-					} else {
-						serviceContainers[name] = converter.ContainerName(project.Name, name, 1)
-					}
+				for name := range project.Services {
+					serviceContainers[name] = converter.ResolveContainerName(project, name, 1)
 				}
 
 				// Follow logs in background (best-effort display, not a shutdown trigger)

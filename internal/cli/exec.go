@@ -18,6 +18,7 @@ func newExecCmd() *cobra.Command {
 	var detach bool
 	var user string
 	var workdir string
+	var noInteractive bool
 
 	cmd := &cobra.Command{
 		Use:   "exec SERVICE COMMAND [ARGS...]",
@@ -47,19 +48,27 @@ func newExecCmd() *cobra.Command {
 			}
 
 			d := driver.New(logger)
-			containerName := converter.ContainerName(project.Name, serviceName, 1)
+			containerName := converter.ResolveContainerName(project, serviceName, 1)
+
+			interactive := !noInteractive
+			// Allocate a TTY when stdin is a terminal, unless -T was passed.
+			tty := interactive && !noInteractive && isTerminal(os.Stdin)
 
 			return d.ExecContainer(ctx, containerName, execCmd, driver.ExecOptions{
-				Detach:  detach,
-				User:    user,
-				Workdir: workdir,
+				Detach:      detach,
+				User:        user,
+				Workdir:     workdir,
+				Interactive: interactive,
+				TTY:         tty,
 			})
 		},
 	}
 
 	cmd.Flags().BoolVarP(&detach, "detach", "d", false, "Detached mode: run command in the background")
+	cmd.Flags().BoolVarP(&noInteractive, "no-TTY", "T", false, "Disable pseudo-TTY allocation. By default exec allocates a TTY")
 	cmd.Flags().StringVarP(&user, "user", "u", "", "Username or UID")
 	cmd.Flags().StringVarP(&workdir, "workdir", "w", "", "Working directory inside the container")
+	cmd.Flags().SetInterspersed(false)
 
 	return cmd
 }

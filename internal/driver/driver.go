@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/apple/container-compose/internal/output"
@@ -479,9 +480,11 @@ func (d *Driver) BuildImageWithOptions(ctx context.Context, contextPath string, 
 }
 
 type ExecOptions struct {
-	Detach  bool
-	User    string
-	Workdir string
+	Detach      bool
+	User        string
+	Workdir     string
+	Interactive bool
+	TTY         bool
 }
 
 func (d *Driver) ExecContainer(ctx context.Context, containerName string, command []string, opts ExecOptions) error {
@@ -489,6 +492,12 @@ func (d *Driver) ExecContainer(ctx context.Context, containerName string, comman
 
 	if opts.Detach {
 		args = append(args, "-d")
+	}
+	if opts.Interactive {
+		args = append(args, "-i")
+	}
+	if opts.TTY {
+		args = append(args, "-t")
 	}
 	if opts.User != "" {
 		args = append(args, "-u", opts.User)
@@ -501,10 +510,20 @@ func (d *Driver) ExecContainer(ctx context.Context, containerName string, comman
 	args = append(args, command...)
 
 	d.logger.Debugf("Exec: %s %s", containerBinary, strings.Join(args, " "))
+
+	// For interactive sessions, replace the current process with the container
+	// binary so it gets direct access to the terminal (PTY, paste buffer, etc.).
+	if opts.Interactive && !opts.Detach {
+		binary, err := exec.LookPath(containerBinary)
+		if err != nil {
+			return fmt.Errorf("finding %s binary: %w", containerBinary, err)
+		}
+		return syscall.Exec(binary, append([]string{containerBinary}, args...), os.Environ())
+	}
+
 	cmd := exec.CommandContext(ctx, containerBinary, args...)
 	cmd.Stdout = d.logger.Stdout()
 	cmd.Stderr = d.logger.Stderr()
-	cmd.Stdin = nil // TODO: support interactive mode
 
 	return cmd.Run()
 }
@@ -892,10 +911,10 @@ func (d *Driver) RunContainerInteractive(ctx context.Context, args []string) err
 
 func (d *Driver) AttachContainer(ctx context.Context, name string) error {
 	d.logger.Debugf("Attaching to container: %s", name)
-	cmd := exec.CommandContext(ctx, containerBinary, "exec", "-it", name, "/bin/sh")
-	cmd.Stdout = d.logger.Stdout()
-	cmd.Stderr = d.logger.Stderr()
-	cmd.Stdin = os.Stdin
-
-	return cmd.Run()
+	args := []string{"exec", "-it", name, "/bin/sh"}
+	binary, err := exec.LookPath(containerBinary)
+	if err != nil {
+		return fmt.Errorf("finding %s binary: %w", containerBinary, err)
+	}
+	return syscall.Exec(binary, append([]string{containerBinary}, args...), os.Environ())
 }

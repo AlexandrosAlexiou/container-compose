@@ -29,7 +29,7 @@ sudo make install
 | `ps` | List running services |
 | `logs` | View output from containers (`-f`, `--tail`) |
 | `build` | Build or rebuild services |
-| `exec` | Execute a command in a running service container |
+| `exec` | Execute a command in a running service container (`-d`, `-u`, `-w`, `-T`) |
 | `run` | Run a one-off command on a service (`--rm`, `-e`, `-u`, `-w`) |
 | `start` | Start existing stopped containers |
 | `stop` | Stop running containers without removing |
@@ -88,8 +88,14 @@ container-compose logs -f web
 container-compose build
 container-compose build api
 
-# Execute a command in a running container
+# Execute a command in a running container (interactive by default)
 container-compose exec db psql -U postgres
+
+# Execute with flags passed to the container command
+container-compose exec kafka kafka-console-producer --topic my-topic --bootstrap-server kafka:9092
+
+# Execute non-interactively (e.g. for scripting)
+container-compose exec -T db psql -U postgres -c "SELECT 1"
 
 # Run a one-off command
 container-compose run web python manage.py migrate
