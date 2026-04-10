@@ -25,7 +25,7 @@ sudo make install
 | Command | Description |
 |---------|-------------|
 | `up` | Create and start containers (`-d`, `--build`, `--scale`) |
-| `down` | Stop and remove containers, networks (`-v`) |
+| `down` | Stop and remove containers, networks (`-v`, `--remove-orphans`) |
 | `ps` | List running services |
 | `logs` | View output from containers (`-f`, `--tail`) |
 | `build` | Build or rebuild services |
@@ -43,6 +43,7 @@ sudo make install
 | `top` | Display running processes |
 | `port` | Print the public port for a port binding |
 | `images` | List images used by services |
+| `rmi` | Remove images used by services |
 | `stats` | Display container resource usage |
 | `config` | Validate and render compose file |
 | `version` | Show version information |
@@ -50,6 +51,10 @@ sudo make install
 | `attach` | Attach stdin/stdout/stderr to a running container |
 | `login` | Log in to a container registry |
 | `logout` | Log out from a container registry |
+| `network ls` | List networks |
+| `network create` | Create a network |
+| `network rm` | Remove one or more networks |
+| `network prune` | Remove all unused project networks (`-f`) |
 
 ## Usage
 
@@ -100,6 +105,10 @@ container-compose pull
 container-compose push
 container-compose images
 
+# Remove images used by services
+container-compose rmi
+container-compose rmi web api
+
 # Copy files
 container-compose cp web:/app/logs ./logs
 container-compose cp ./config.yml web:/app/config.yml
@@ -108,6 +117,12 @@ container-compose cp ./config.yml web:/app/config.yml
 container-compose top
 container-compose stats
 container-compose port web 80
+
+# Network management
+container-compose network ls
+container-compose network create mynetwork
+container-compose network rm mynetwork
+container-compose network prune --force
 
 # Validate compose file
 container-compose config
@@ -370,6 +385,24 @@ Integration test fixtures are in `testdata/fixtures/` and cover:
 - `depends_on: condition: service_started`
 - Full WordPress + MySQL stack (real-world compose file)
 - Comprehensive `TestFullFeatures` test validating 14 features together
+
+## Architecture
+
+`container-compose` uses [`compose-spec/compose-go`](https://github.com/compose-spec/compose-go) (v2) as its compose file parser. This is the **official Go reference implementation** of the [Compose specification](https://compose-spec.io/) — the same library used by Docker Compose itself.
+
+### What compose-go provides
+
+By depending on compose-go, `container-compose` gets full spec compliance without reimplementing the parser:
+
+- **File discovery** — automatically finds `docker-compose.yml`, `compose.yml`, or `compose.yaml` in the working directory, and respects the `COMPOSE_FILE` environment variable
+- **YAML parsing and schema validation** — parses compose files and validates them against the Compose specification JSON schema
+- **Variable interpolation** — resolves `${VAR}`, `${VAR:-default}`, and `${VAR:?error}` patterns using the process environment and `.env` files
+- **Extends and includes** — resolves `extends` and `include` directives across multiple files, with full merge semantics
+- **Profile filtering** — filters services based on active `--profile` flags
+- **Type normalization** — normalizes the many YAML representations (e.g., ports as strings or objects, durations as strings or integers) into consistent Go structs
+- **Dependency graph** — resolves `depends_on` references and validates that referenced services exist
+
+In short: **compose-go handles "what does the user want?"** and **container-compose handles "how do we make Apple Container do it?"**
 
 ## Debugging
 
